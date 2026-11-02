@@ -1,5 +1,13 @@
 [
   {
+    "slug": "dirrunner-module-demo",
+    "title": "dirrunner: Enumeration / Crawler / Web Scanner tool",
+    "date": "2026-11-02",
+    "repo": "DirRunner",
+    "tags": ["recon", "fuzzing", "web", "dns", "sqli", "traversal"],
+    "summary": "Interactive walkthrough of every DirRunner module (enumeration, crawler, bruteforce, web scanner). Links to the demo."
+  },
+  {
     "slug": "valky-pivot-demo",
     "title": "valky: multi-agent L3 pivoting",
     "date": "2026-10-28",

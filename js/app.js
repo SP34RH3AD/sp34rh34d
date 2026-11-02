@@ -29,17 +29,22 @@
 
   const fmtDate = (d) => new Date(d).toLocaleDateString("en", { year: "numeric", month: "short", day: "2-digit" });
 
-  function cacheGet(key) {
+  // Public GitHub data is cached in localStorage so reloads and new tabs don't
+  // burn the unauthenticated API quota (60 req/hour per IP).
+  function cacheRead(key) {
     try {
-      const raw = sessionStorage.getItem(key);
-      if (!raw) return null;
-      const { t, v } = JSON.parse(raw);
-      return Date.now() - t < CACHE_TTL ? v : null;
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   }
 
+  function cacheGet(key) {
+    const c = cacheRead(key);
+    return c && Date.now() - c.t < CACHE_TTL ? c.v : null;
+  }
+
   function cacheSet(key, v) {
-    try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), v })); } catch { /* no storage */ }
+    try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), v })); } catch { /* no storage */ }
   }
 
   async function getJSON(url, cacheKey) {
@@ -47,10 +52,23 @@
       const hit = cacheGet(cacheKey);
       if (hit) return hit;
     }
-    const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
+    let res;
+    try {
+      res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
+    } catch (e) {
+      const stale = cacheKey && cacheRead(cacheKey);
+      if (stale) return stale.v;
+      throw e;
+    }
     if (!res.ok) {
+      const stale = cacheKey && cacheRead(cacheKey);
+      if (stale) return stale.v; // serve expired data rather than nothing
       const err = new Error(`HTTP ${res.status}`);
       err.status = res.status;
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      const reset = Number(res.headers.get("x-ratelimit-reset"));
+      err.rateLimited = res.status === 429 || (res.status === 403 && remaining === "0");
+      if (reset) err.resetAt = new Date(reset * 1000);
       throw err;
     }
     const data = await res.json();
@@ -58,17 +76,37 @@
     return data;
   }
 
+  // Static snapshot (refreshed by .github/workflows/snapshot.yml), used when the API fails.
+  async function getSnapshot(path) {
+    const res = await fetch(path, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function apiErrorMsg(e, what) {
+    if (e.rateLimited) {
+      const when = e.resetAt ? ` Resets at ${e.resetAt.toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}.` : "";
+      return `GitHub API rate limit reached.${when}`;
+    }
+    if (e.status === 404) return `GitHub user "${CFG.githubUser}" not found. Check githubUser in config.js.`;
+    return `failed to load ${what}: ${e.message}`;
+  }
+
   // ---------- data ----------
   async function loadRepos() {
     if (state.repos) return state.repos;
-    const all = [];
-    for (let page = 1; page <= 5; page++) {
-      const batch = await getJSON(
-        `${API}/users/${encodeURIComponent(CFG.githubUser)}/repos?per_page=100&page=${page}&sort=updated`,
-        `repos:${CFG.githubUser}:${page}`
-      );
-      all.push(...batch);
-      if (batch.length < 100) break;
+    let all = [];
+    try {
+      for (let page = 1; page <= 5; page++) {
+        const batch = await getJSON(
+          `${API}/users/${encodeURIComponent(CFG.githubUser)}/repos?per_page=100&page=${page}&sort=updated`,
+          `repos:${CFG.githubUser}:${page}`
+        );
+        all.push(...batch);
+        if (batch.length < 100) break;
+      }
+    } catch (e) {
+      try { all = await getSnapshot(CFG.reposSnapshot); } catch { throw e; }
     }
     state.repos = all.filter((r) => !CFG.hideRepos.includes(r.name));
     return state.repos;
@@ -76,7 +114,11 @@
 
   async function loadUser() {
     if (state.user) return state.user;
-    state.user = await getJSON(`${API}/users/${encodeURIComponent(CFG.githubUser)}`, `user:${CFG.githubUser}`);
+    try {
+      state.user = await getJSON(`${API}/users/${encodeURIComponent(CFG.githubUser)}`, `user:${CFG.githubUser}`);
+    } catch (e) {
+      try { state.user = await getSnapshot(CFG.userSnapshot); } catch { throw e; }
+    }
     return state.user;
   }
 
@@ -142,22 +184,24 @@
       ? posts.slice(0, 3).map(postItem).join("")
       : '<p class="status">// no posts yet</p>';
 
-    let repos = [];
+    let repos = [], err = null;
     try {
       repos = await loadRepos();
       $("#stat-repos").textContent = repos.filter((r) => !r.fork).length;
       $("#stat-stars").textContent = repos.reduce((n, r) => n + r.stargazers_count, 0);
-    } catch {
+    } catch (e) {
+      err = e;
       $("#stat-repos").textContent = "?";
       $("#stat-stars").textContent = "?";
     }
-    typeTerminal(repos);
+    typeTerminal(repos, err);
   }
 
-  function typeTerminal(repos) {
+  function typeTerminal(repos, err) {
     clearTimeout(termTimer);
     const out = $("#term-out");
-    const recent = repos.filter((r) => !r.fork).slice(0, 6).map((r) => r.name).join("  ") || "(GitHub API rate limit hit, try again later)";
+    const recent = repos.filter((r) => !r.fork).slice(0, 6).map((r) => r.name).join("  ") ||
+      (err ? `(${apiErrorMsg(err, "repos")})` : "(no public repos)");
     const lines = CFG.terminal.map((l) => ({ cmd: l.cmd, out: l.out.replace("__REPOS__", recent) }));
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -203,9 +247,7 @@
       await Promise.all([loadRepos(), loadPosts().catch(() => [])]);
     } catch (e) {
       status.className = "status error";
-      status.textContent = e.status === 403
-        ? "// GitHub API rate limit reached. Try again in a few minutes."
-        : `// failed to load repos: ${e.message}`;
+      status.textContent = `// ${apiErrorMsg(e, "repos")}`;
       return;
     }
     renderLangChips();
@@ -314,25 +356,80 @@
   async function renderAbout() {
     const box = $("#about-box");
     box.innerHTML = '<p class="status">// querying ...</p>';
-    try {
-      const u = await loadUser();
-      const rows = [
-        ["user", `<a href="${esc(u.html_url)}" target="_blank" rel="noopener">${esc(u.login)}</a>`],
-        u.name && ["name", esc(u.name)],
-        u.bio && ["bio", esc(u.bio)],
-        u.company && ["org", esc(u.company)],
-        u.location && ["loc", esc(u.location)],
-        u.blog && ["web", `<a href="${esc(/^https?:/.test(u.blog) ? u.blog : "https://" + u.blog)}" target="_blank" rel="noopener">${esc(u.blog)}</a>`],
-        ["repos", u.public_repos],
-        ["followers", u.followers],
-        ["since", fmtDate(u.created_at)]
-      ].filter(Boolean);
-      box.innerHTML = `
-        <img src="${esc(u.avatar_url)}" alt="avatar of ${esc(u.login)}">
-        <dl>${rows.map(([k, v]) => `<dt>${k}:</dt><dd>${v}</dd>`).join("")}</dl>`;
-    } catch (e) {
-      box.innerHTML = `<p class="status error">// error: ${esc(e.message)}</p>`;
-    }
+
+    const about = CFG.about || {};
+    let u = null;
+    try { u = await loadUser(); } catch { u = null; } // profile text works even if GitHub is down
+    let repos = null;
+    try { repos = await loadRepos(); } catch { repos = null; } // to split own vs forked
+
+    const bio = Array.isArray(about.bio) ? about.bio : (about.bio ? [about.bio] : []);
+    const skills = about.skills || [];
+    const certs = about.certifications || [];
+    const knowledge = about.knowledge || [];
+    const links = about.links || [];
+    const handle = about.handle || (u && (u.name || u.login)) || CFG.githubUser;
+
+    // repo breakdown: own vs forked (from the live repo list when available)
+    const ownCount = repos ? repos.filter((r) => !r.fork).length : null;
+    const forkCount = repos ? repos.filter((r) => r.fork).length : null;
+
+    // GitHub-sourced facts (only shown when available)
+    const statRows = u ? [
+      ["user", `<a href="${esc(u.html_url)}" target="_blank" rel="noopener">${esc(u.login)}</a>`],
+      u.name && ["name", esc(u.name)],
+      u.bio && ["bio", esc(u.bio)],
+      u.company && ["org", esc(u.company)],
+      u.location && ["loc", esc(u.location)],
+      u.blog && ["web", `<a href="${esc(/^https?:/.test(u.blog) ? u.blog : "https://" + u.blog)}" target="_blank" rel="noopener">${esc(u.blog)}</a>`],
+      repos ? ["own repos", ownCount] : ["repos", u.public_repos],
+      repos && forkCount ? ["forks", forkCount] : null,
+      ["followers", u.followers],
+      ["since", fmtDate(u.created_at)]
+    ].filter(Boolean) : [];
+
+    const avatar = u
+      ? `<img src="${esc(u.avatar_url)}" alt="avatar of ${esc(u.login)}">`
+      : `<div class="about-avatar-fallback" aria-hidden="true">${esc((handle[0] || "?").toUpperCase())}</div>`;
+
+    const descCard = `
+      <section class="about-card">
+        <h3 class="about-handle">${esc(handle)}</h3>
+        ${about.role ? `<p class="about-role">${esc(about.role)}</p>` : ""}
+        ${about.tagline ? `<p class="about-tagline">${esc(about.tagline)}</p>` : ""}
+        ${bio.map((p) => `<p class="about-bio">${esc(p)}</p>`).join("")}
+        ${links.length ? `<p class="about-links">${links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join("  ·  ")}</p>` : ""}
+      </section>`;
+
+    const chipCard = (title, items) => items.length ? `
+      <section class="about-card">
+        <p class="about-subhead">${esc(title)}</p>
+        <div class="chips">${items.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div>
+      </section>` : "";
+
+    const certCard = certs.length ? `
+      <section class="about-card">
+        <p class="about-subhead">certifications</p>
+        <ul class="certs">${certs.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+      </section>` : "";
+
+    const ghCard = `
+      <section class="about-card">
+        <p class="about-subhead">github profile</p>
+        ${statRows.length
+          ? `<dl>${statRows.map(([k, v]) => `<dt>${k}:</dt><dd>${v}</dd>`).join("")}</dl>`
+          : `<p class="status">// live GitHub profile unavailable right now</p>`}
+      </section>`;
+
+    box.innerHTML = `
+      ${avatar}
+      <div class="about-main">
+        ${descCard}
+        ${certCard}
+        ${chipCard("knowledge", knowledge)}
+        ${chipCard("focus", skills)}
+        ${ghCard}
+      </div>`;
   }
 
   // ---------- router ----------

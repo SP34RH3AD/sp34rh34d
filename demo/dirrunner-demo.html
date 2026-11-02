@@ -1,0 +1,726 @@
+<meta charset="utf-8">
+<title>DirRunner Module Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Reproduces DirRunner's real terminal output: ASCII banner, options menu,
+     [◇]/[▲]/[✓]/[»] log prefixes, the ⟦█░⟧ progress bar and the
+     type/status-colored result columns. Neon ANSI palette on a dark panel. */
+  :root {
+    --bg:#0d0f12; --panel:#14181d; --panel-2:#0a0c0f; --line:#262c34;
+    --fg:#d9dde3; --muted:#7d8590; --dim:#343c46;
+    /* neon ANSI (bright) variants used by output.go */
+    --np:#ff6ac1;   /* neon pink   (banner, bar fill, sqli/bypass/traversal) */
+    --nc:#5ff2ff;   /* neon cyan   (info, dns/fingerprint) */
+    --ng:#6bff9e;   /* neon green   (success, 2xx, version, percent) */
+    --ny:#ffe45f;   /* neon yellow  (warn-ish, 4xx) */
+    --nr:#ff6b6b;   /* neon red     (5xx) */
+    --nb:#6f9bff;   /* neon blue    (directory/file/url) */
+    --gy:#7d8590;   /* gray */
+    --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans:"Rajdhani", "JetBrains Mono", system-ui, -apple-system, Segoe UI, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 600px at 82% -10%, rgba(95,242,255,.05), transparent 60%),
+      radial-gradient(900px 500px at 4% 110%, rgba(255,106,193,.045), transparent 55%),
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 32px 32px,
+      var(--bg);
+    color: var(--fg); font-family: var(--sans); line-height: 1.5; margin: 0;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+  }
+  @media (prefers-reduced-motion: reduce) { body::before { display: none; } }
+  .wrap {
+    max-width: 1280px; margin: 0 auto; padding-block: 18px 16px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    /* Full-height app: terminal flexes and scrolls internally so the control
+       bar stays pinned at the bottom of the viewport without page scroll. */
+    height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  code { font-family: var(--mono); font-size: .9em; color: var(--nc); }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
+  .brand { font-family: var(--mono); font-weight: 700; font-size: 25px; letter-spacing: 1px; color: var(--fg); }
+  .brand .mg { color: var(--np); } .brand .sep { color: var(--nc); }
+  .brand .cursor { color: var(--nc); animation: blink 1.1s steps(1) infinite; }
+  .tag { color: var(--muted); font-size: 14px; max-width: 70ch; }
+  .scope {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: .6px;
+    text-transform: uppercase; color: var(--ny);
+    border: 1px solid rgba(255,228,95,.3); border-radius: 999px; padding: 4px 11px;
+    background: rgba(255,228,95,.06); white-space: nowrap;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line);
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+    padding: 9px 16px; cursor: pointer; transition: .2s; border-bottom-width: 2px; text-align: left;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.on { color: var(--bg); font-weight: 600; }
+  .tab.on.enum { background: var(--ng); border-color: var(--ng); }
+  .tab.on.crawl { background: var(--nc); border-color: var(--nc); }
+  .tab.on.brute { background: var(--ny); border-color: var(--ny); }
+  .tab.on.web { background: var(--np); border-color: var(--np); }
+  .tab.on.dl { background: var(--nb); border-color: var(--nb); }
+  .tab .k { font-size: 10px; display: block; opacity: .78; font-weight: 400; }
+
+  #stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .card { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); overflow: hidden; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .card-head { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; letter-spacing: .3px; color: var(--muted); }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1){ background:#ff5f56; } .dots i:nth-child(2){ background:#ffbd2e; } .dots i:nth-child(3){ background:#27c93f; }
+  .card-head .title { margin-left: 4px; } .card-head .meta { margin-left: auto; color: var(--dim); }
+
+  #term { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 14px 16px; flex: 1 1 auto; min-height: 120px; overflow-y: auto; white-space: pre; }
+  @media (max-width: 620px) { #term { white-space: pre-wrap; word-break: break-word; font-size: 11.5px; } }
+  #term .ln { display: block; min-height: 1.05em; }
+  .host { color: var(--ng); font-weight: 600; } .sep { color: var(--np); } .cmd { color: var(--fg); }
+  .np { color: var(--np); } .nc { color: var(--nc); } .ng { color: var(--ng); }
+  .ny { color: var(--ny); } .nr { color: var(--nr); } .nb { color: var(--nb); }
+  .gy { color: var(--gy); } .b { font-weight: 600; }
+  .caret { background: var(--nc); color: var(--bg); animation: blink 1.1s steps(1) infinite; }
+
+  .caption { margin-top: 12px; padding: 11px 14px; border: 1px solid var(--line); border-left: 2px solid var(--nc); background: var(--panel-2); font-size: 12.5px; color: var(--fg); font-family: var(--mono); line-height: 1.6; min-height: 54px; }
+  .caption b { color: var(--ng); font-weight: 600; } .caption .y { color: var(--ny); } .caption .r { color: var(--np); } .caption .c { color: var(--nc); }
+  .caption .lbl { color: var(--muted); }
+
+  .controls { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
+  button.ctl { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); padding: 9px 14px; cursor: pointer; transition: .2s; }
+  button.ctl:hover { border-color: var(--nc); color: var(--nc); }
+  button.ctl:focus-visible { outline: 2px solid var(--nc); outline-offset: 2px; }
+  button.ctl.primary { background: rgba(95,242,255,.1); border-color: rgba(95,242,255,.4); color: var(--nc); }
+  button.ctl:disabled { opacity: .4; cursor: default; border-color: var(--line); color: var(--muted); }
+  .steps { display: flex; gap: 6px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .steps .sd { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); border: none; padding: 0; cursor: pointer; transition: .2s; }
+  .steps .sd:hover { transform: scale(1.25); } .steps .sd.on { background: var(--nc); } .steps .sd.done { background: var(--ng); }
+  .foot { margin-top: 18px; color: var(--dim); font-size: 11.5px; font-family: var(--mono); }
+  @media (prefers-reduced-motion: reduce) { .cursor, .caret { animation: none; } }
+
+  /* ---------- Downloads / releases ---------- */
+  #downloads { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .dl-head { display: flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+  .dl-head .repo { color: var(--ny); }
+  .dl-head .meta { margin-left: auto; color: var(--dim); }
+  .dl-status { font-family: var(--mono); font-size: 12.5px; color: var(--muted); padding: 20px 2px; }
+  .dl-status.err { color: var(--np); }
+  .rel {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .rel-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .rel-top h3 { margin: 0; font-family: var(--sans); font-weight: 600; font-size: 18px; letter-spacing: .5px; color: var(--fg); word-break: break-word; }
+  .rel-tag { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--ny); padding: 1px 8px; white-space: nowrap; }
+  .rel-tag.pre { background: var(--np); color: var(--fg); }
+  .rel-date { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .assets { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .asset { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); padding: 7px 11px; }
+  .asset a { color: var(--nc); text-decoration: none; min-width: 0; word-break: break-all; }
+  .asset a:hover { text-decoration: underline; }
+  .asset .sz { color: var(--muted); } .asset .dc { margin-left: auto; color: var(--dim); white-space: nowrap; }
+  .rel-src { margin-top: 10px; font-family: var(--mono); font-size: 11.5px; }
+  .rel-src a { color: var(--nc); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="mg">dirrunner</span><span class="sep">❯</span> module demo<span class="cursor">▋</span></div>
+    <p class="tag">Go web scanner — the real CLI output: DNS &amp; directory enumeration, crawling, CSRF-aware fuzzing and web-assessment probes. One scenario per module group.</p>
+    <span class="scope">lab · authorized use</span>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab enum on" id="tab-enum" role="tab"><span>Enumeration</span><span class="k">dns · dir · vhost · fingerprint</span></button>
+    <button class="tab crawl" id="tab-crawl" role="tab"><span>Crawler</span><span class="k">crawl · clone</span></button>
+    <button class="tab brute" id="tab-brute" role="tab"><span>Bruteforce · CSRF</span><span class="k">fuzz · --csrf-field bypass</span></button>
+    <button class="tab web" id="tab-web" role="tab"><span>Web scanner</span><span class="k">traversal · bypass · sqli</span></button>
+    <button class="tab dl" id="tab-dl" role="tab"><span>Downloads</span><span class="k">releases · github api</span></button>
+  </div>
+
+  <div id="stage">
+    <section class="card">
+      <div class="card-head">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="title">operator@lab: ~/DirRunner</span>
+        <span class="meta" id="mode-label">idle…</span>
+      </div>
+      <div id="term" aria-live="polite"></div>
+    </section>
+    <div class="caption" id="caption"></div>
+  </div>
+
+  <section id="downloads" hidden aria-label="Downloads">
+    <div class="dl-head">
+      <span>$ gh release list --repo <span class="repo" id="dl-repo">—</span></span>
+      <span class="meta" id="dl-count"></span>
+    </div>
+    <div id="dl-list"></div>
+  </section>
+
+  <div class="controls">
+    <button class="ctl primary" id="play">▶ Play</button>
+    <button class="ctl" id="prev" disabled>◀ Back</button>
+    <button class="ctl" id="next">Next ▶</button>
+    <button class="ctl" id="restart">⟲ Restart</button>
+    <button class="ctl" id="speed">⏱ Speed: Slow</button>
+    <div class="steps" id="steps" aria-hidden="true"></div>
+  </div>
+
+  <p class="foot">Lab scenario · every target is in a documentation/test range · testing client assets requires written authorization and a defined scope.</p>
+</div>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Rajdhani:wght@500;600;700&display=swap">
+
+<script>
+(function () {
+  "use strict";
+  var RELEASES_REPO = "SP34RH3AD/DirRunner";
+  var VERSION = "2.0.0";
+  var UA = "DirRunner v2.0.0";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- speed / timing ----------
+  var SPEEDS = [{ n: "Slow", f: 1 }, { n: "Medium", f: 2 }, { n: "Fast", f: 3.4 }];
+  var spi = 0;
+  function spd() { return SPEEDS[spi].f; }
+  function d(ms) { return reduce ? Math.min(ms, 40) : Math.round(ms / spd()); }
+  var T_TYPE = 40, T_AFTERCMD = 520, T_LINE = 150, T_STEP = 1400, T_PROG = 150;
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function padEnd(s, w) { s = String(s); return s.length >= w ? s : s + " ".repeat(w - s.length); }
+  function padStart(s, w) { s = String(s); return s.length >= w ? s : " ".repeat(w - s.length) + s; }
+  function span(cls, t) { return '<span class="' + cls + '">' + esc(t) + "</span>"; }
+  function ln(html) { return '<span class="ln">' + html + "</span>"; }
+
+  // ---------- real banner (output.go Banner) ----------
+  function bannerHTML() {
+    var W = 66, bar = "═".repeat(W - 2);
+    var art = [
+      "   ___  _     ___",
+      "  / _ \\(_)___/ _ \\__ _____  ___  ___ ____",
+      " / // / / __/ , _/ // / _ \\/ _ \\/ -_) __/",
+      "/____/_/_/ /_/|_|\\_,_/_//_/_//_/\\__/_/"
+    ];
+    var h = ln(span("np", "╔" + bar + "╗"));
+    for (var i = 0; i < art.length; i++) h += ln(span("np b", art[i]));
+    h += ln(span("nc b", "  ░▒▓ D I R R U N N E R ▓▒░  ") + span("ng", "v" + VERSION));
+    h += ln(span("gy", "  sp34rh34d x @spearh34d"));
+    h += ln(span("np", "╚" + bar + "╝"));
+    return h;
+  }
+
+  // ---------- real options menu (output.OptionsMenu) ----------
+  function menuHTML(title, rows) {
+    var all = [["MODULE", title], ["OPTION", "VALUE"]].concat(rows);
+    var w = 0;
+    all.forEach(function (r) { if (r[0].length > w) w = r[0].length; });
+    w += 2;
+    var h = bannerHTML();
+    h += ln(span("np b", padEnd("MODULE", w)) + span("nc b", title));
+    h += ln(span("gy", padEnd("OPTION", w)) + span("gy", "VALUE"));
+    rows.forEach(function (r) {
+      if (r[1] === "" || r[1] == null) return; // OptionsMenu skips empty values
+      h += ln(span("nc", padEnd(r[0], w)) + span("fg", r[1]));
+    });
+    h += ln(span("gy", "-".repeat(66)));
+    return h;
+  }
+
+  // ---------- log messages (emit) ----------
+  function info(t) { return { html: ln(span("nc", "[◇] ") + span("fg", t)) }; }
+  function warn(t) { return { html: ln(span("np", "[▲] ") + span("np", t)) }; }
+  function ok(t)   { return { html: ln(span("ng", "[✓] ") + span("ng", t)) }; }
+  function dbg(t)  { return { html: ln(span("gy", "[»] ") + span("gy", t)) }; }
+
+  // ---------- result lines (PrintLiveResult) ----------
+  function typeCls(t) {
+    if (t === "directory" || t === "file" || t === "url") return "nb";
+    if (t === "dns" || t === "technology" || t === "fingerprint" || t === "header") return "nc";
+    if (t === "traversal" || t === "sqli" || t === "bypass" || t === "dbms") return "np";
+    if (t === "email" || t === "match" || t === "js" || t === "img" || t === "clone") return "ng";
+    return "nc b";
+  }
+  function statusCls(code) {
+    code = +code;
+    if (code >= 200 && code < 300) return "ng";
+    if (code >= 300 && code < 400) return "nc";
+    if (code >= 400 && code < 500) return "ny";
+    if (code >= 500) return "nr";
+    return "gy";
+  }
+  // general: "%s %s %-8d %s" -> type(-10) status(-7) size(-8) target
+  function res(type, status, size, target) {
+    return { html: ln(
+      span(typeCls(type), padEnd(type, 10)) + " " +
+      span(statusCls(status), padEnd(String(status), 7)) + " " +
+      span("fg", padEnd(String(size), 8)) + " " +
+      span("fg", target)) };
+  }
+  // dns: "%s %-32s %s" -> type(-10) host(-32) ip
+  function dnsres(host, ip) {
+    return { html: ln(span(typeCls("dns"), padEnd("dns", 10)) + " " + span("fg", padEnd(host, 32)) + " " + span("fg", ip)) };
+  }
+  // email/match: "%s %s %s" -> type(-10) value(-40) target
+  function valres(type, value, target) {
+    return { html: ln(span(typeCls(type), padEnd(type, 10)) + " " + span("ng", padEnd(value, 40)) + " " + span("fg", target)) };
+  }
+
+  // ---------- fingerprint table (PrintFingerprintResults) ----------
+  function fpHTML(target, status, size, techs, headers) {
+    var w = 14, h = "";
+    h += ln(span("gy b", padEnd("SUMMARY", w)));
+    h += ln(span("fg", padEnd("Target", w)) + span("fg", target));
+    h += ln(span("fg", padEnd("Status", w)) + span(statusCls(status), String(status)));
+    h += ln(span("fg", padEnd("Size", w)) + span("fg", String(size)));
+    h += ln("");
+    h += ln(span("gy b", padEnd("TECHNOLOGIES", w)));
+    techs.forEach(function (t) { h += ln(span("ng", t)); });
+    h += ln("");
+    h += ln(span("gy b", padEnd("HEADERS", w)));
+    headers.forEach(function (kv) { h += ln(span("nc", padEnd(kv[0], 20)) + span("fg", kv[1])); });
+    return { html: h };
+  }
+
+  // ---------- progress bar (ProgressTracker) ----------
+  var BARW = 24;
+  function progHTML(label, cur, total) {
+    var pct = total > 0 ? Math.min(100, Math.floor(cur * 100 / total)) : 0;
+    var filled = Math.min(BARW, Math.floor(pct * BARW / 100));
+    var bar = span("np", "█".repeat(filled)) + span("gy", "░".repeat(BARW - filled));
+    return ln(span("nc", "[◇] ") + span("nc", label) + " ⟦" + bar + "⟧ " +
+      span("ng", padStart(pct + "%", 4)) + " " + span("gy", "(" + cur + "/" + total + ")"));
+  }
+
+  // common option rows
+  function baseRows(threads) { return [["Threads", String(threads || 40)], ["JSON output", "false"], ["Export", ""], ["Verbose", "false"]]; }
+  function httpRows(timeout) {
+    return [["User-Agent", UA], ["Cookie", "disabled"], ["Basic auth", "disabled"],
+      ["Timeout", timeout || "10s"], ["TLS validation", "true"], ["Follow redirects", "false"],
+      ["Custom headers", "0"], ["Exclude sizes", "disabled"], ["Exclude size ranges", "disabled"], ["Proxy", "disabled"]];
+  }
+
+  // ===================================================================
+  //  SCENARIOS
+  // ===================================================================
+  var ENUM = {
+    key: "enum",
+    intro: "<span class=\"lbl\">// Hit</span> <b>▶ Play</b> <span class=\"lbl\">to run the enumeration modules:</span> dns → dir → vhost → fingerprint.",
+    steps: [
+      { prompt: "./dirrunner dns -d example.com -w wordlist/subdomains.txt",
+        out: [ { menu: ["DNS Enumeration", baseRows(40).concat([["Target domain", "example.com"], ["Wordlist", "wordlist/subdomains.txt"]]) ] },
+          info("loading wordlist wordlist/subdomains.txt..."),
+          info("starting enumeration with 40 workers and 2560 words"),
+          { prog: ["Progress", 2560] },
+          dnsres("api.example.com", "192.0.2.21"),
+          dnsres("dev.example.com", "192.0.2.37"),
+          dnsres("admin.example.com", "192.0.2.10"),
+          dnsres("vpn.example.com", "198.51.100.8") ],
+        caption: "<b>dns</b> <span class=\"lbl\">— wordlist-driven subdomain resolution across 40 workers. Output is the real</span> TYPE HOST IP <span class=\"lbl\">stream;</span> <span class=\"c\">admin.example.com</span> <span class=\"lbl\">is the lead.</span>",
+        mode: "dns" },
+      { prompt: "./dirrunner dir -u https://admin.example.com -w wordlist/directory.txt -c 200,301,302,403",
+        out: [ { menu: ["Dir Enumeration", httpRows("15s").concat([
+              ["Target URL", "https://admin.example.com"], ["Method", "GET"], ["Status codes", "200,301,302,403"],
+              ["Directories", "enabled"], ["Directory wordlist", "wordlist/directory.txt"],
+              ["Files", "disabled"], ["File wordlist", "wordlist/filename.txt"], ["Extensions", "disabled"],
+              ["Recursive", "false"], ["Max depth", "1"], ["Wildcard check", "false"] ]) ] },
+          info("starting dir enumeration..."),
+          info("loading wordlist wordlist/directory.txt..."),
+          info("starting enumeration with 40 workers and 4614 words"),
+          { prog: ["Progress", 4614] },
+          res("directory", 200, 777, "/cgi-bin/"),
+          res("directory", 301, 239, "/admin/"),
+          res("directory", 403, 162, "/backup/"),
+          info("scan summary: 4614 requests, 3 matched, 4598x404, 11x403, 2x500") ],
+        caption: "<b>dir</b> <span class=\"lbl\">— directory-only (file checks need</span> <code>--ext</code><span class=\"lbl\">). Columns are</span> type · status · size · path<span class=\"lbl\">. Note the</span> <span class=\"y\">403 /backup/</span> <span class=\"lbl\">— revisited in the Web scanner tab.</span>",
+        mode: "dir" },
+      { prompt: "./dirrunner vhost -u https://192.0.2.10 -d example.com -w wordlist/subdomains.txt",
+        out: [ { menu: ["VHost Enumeration", httpRows("10s").concat([
+              ["Target URL", "https://192.0.2.10"], ["Base domain", "example.com"], ["Wordlist", "wordlist/subdomains.txt"] ]) ] },
+          info("loading wordlist wordlist/subdomains.txt..."),
+          info("starting enumeration with 40 workers and 2560 words"),
+          { prog: ["Progress", 2560] },
+          res("vhost", 200, 4821, "staging.example.com"),
+          info("scan summary: 2560 requests, 1 matched, 2559x162") ],
+        caption: "<b>vhost</b> <span class=\"lbl\">— same IP, swapped</span> <code>Host</code> <span class=\"lbl\">header. A response size off the baseline (162) reveals the hidden</span> <span class=\"c\">staging</span> <span class=\"lbl\">vhost.</span>",
+        mode: "vhost" },
+      { prompt: "./dirrunner fingerprint -u https://admin.example.com",
+        out: [ { menu: ["Fingerprint", httpRows("10s").concat([["Target URL", "https://admin.example.com"]]) ] },
+          info("scanning https://admin.example.com"),
+          fpHTML("https://admin.example.com", 200, 5120,
+            ["Laravel", "Nginx", "PHP"],
+            [["Server", "nginx/1.25"], ["X-Powered-By", "PHP/8.2"], ["Set-Cookie", "XSRF-TOKEN=...; laravel_session=..."]]),
+          warn("Laravel XSRF-TOKEN present: the login form is CSRF-protected") ],
+        caption: "<b>fingerprint</b> <span class=\"lbl\">— prints the real SUMMARY / TECHNOLOGIES / HEADERS table. The</span> <span class=\"y\">XSRF-TOKEN</span> <span class=\"lbl\">cookie is why plain bruteforcing fails — see the next tab.</span>",
+        mode: "fingerprint" }
+    ]
+  };
+
+  var CRAWL = {
+    key: "crawl",
+    intro: "<span class=\"lbl\">// Hit</span> <b>▶ Play</b> <span class=\"lbl\">to run the crawling modules:</span> crawl → clone.",
+    steps: [
+      { prompt: "./dirrunner crawl -u https://example.com -t 40",
+        out: [ { menu: ["Crawl", httpRows("10s").concat([["Target URL", "https://example.com"], ["Regx filter", "disabled"]]) ] },
+          info("scanning https://example.com"),
+          { prog: ["Progress", 180] },
+          res("url", 200, 5120, "https://example.com/blog"),
+          res("url", 200, 3980, "https://example.com/api/v1/docs"),
+          valres("js", "/assets/app.4f1c.js", "https://example.com/"),
+          valres("img", "/img/hero.png", "https://example.com/"),
+          valres("email", "soporte@example.com", "https://example.com/contact") ],
+        caption: "<b>crawl</b> <span class=\"lbl\">— one pass unifies link discovery, JS/image scraping and e-mail extraction.</span> js/img/email <span class=\"lbl\">rows print</span> type · value · source.",
+        mode: "crawl" },
+      { prompt: "./dirrunner crawl -u https://example.com --regx 'AKIA[0-9A-Z]{16}'",
+        out: [ { menu: ["Crawl", httpRows("10s").concat([["Target URL", "https://example.com"], ["Regx filter", "AKIA[0-9A-Z]{16}"]]) ] },
+          info("regx filter active: \"AKIA[0-9A-Z]{16}\""),
+          info("scanning https://example.com"),
+          { prog: ["Progress", 180] },
+          valres("match", "AKIA************", "https://example.com/assets/app.4f1c.js") ],
+        caption: "<span class=\"y\">--regx</span> <span class=\"lbl\">greps response bodies. A hard-coded key surfaced — shown</span> <span class=\"y\">masked</span><span class=\"lbl\">; in a real engagement, report it and advise rotation, never echo the full value.</span>",
+        mode: "crawl --regx" },
+      { prompt: "./dirrunner clone -u https://example.com -o ./clone",
+        out: [ { menu: ["Clone", httpRows("10s").concat([["Target URL", "https://example.com"], ["Output dir", "./clone"]]) ] },
+          info("cloning https://example.com into clone/ with 40 workers"),
+          { prog: ["Progress", 48] },
+          info("clone complete: 48 resources saved under clone/") ],
+        caption: "<b>clone</b> <span class=\"lbl\">— breadth-first mirror to</span> <code>./clone</code> <span class=\"lbl\">for offline source review, only against assets you are authorized to copy.</span>",
+        mode: "clone" }
+    ]
+  };
+
+  var BRUTE = {
+    key: "brute",
+    intro: "<span class=\"lbl\">// Hit</span> <b>▶ Play</b><span class=\"lbl\">. This tab is the</span> <span class=\"y\">anti-CSRF token bypass</span><span class=\"lbl\">: a naive password fuzz finds nothing, then</span> <code>--csrf-field</code> <span class=\"lbl\">defeats the per-request token.</span>",
+    steps: [
+      { prompt: "./dirrunner fuzz -u https://admin.example.com/login -X POST -p 'username=admin&password=FUZZ' -w wordlist/passwords.txt -c 302",
+        out: [ { menu: ["Fuzz Enumeration", httpRows("10s").concat([
+              ["Target URL", "https://admin.example.com/login"], ["Method", "POST"], ["Wordlist", "wordlist/passwords.txt"],
+              ["Status codes", "302"], ["JSON body", "disabled"], ["POST data", "enabled"],
+              ["CSRF field", "disabled"], ["Encodings", "disabled"] ]) ] },
+          info("loading wordlist wordlist/passwords.txt..."),
+          info("starting enumeration with 40 workers and 213 words"),
+          { prog: ["Progress", 213] },
+          info("scan summary: 213 requests, 0 matched, 213x200") ],
+        caption: "<span class=\"lbl\">Naive fuzz:</span> <span class=\"r\">0 matched</span><span class=\"lbl\">. Laravel re-renders the form (200) and drops every POST because it carries no valid</span> <code>csrf</code> <span class=\"lbl\">token or matching session cookie. No 302 ever appears.</span>",
+        mode: "fuzz (CSRF field: disabled)" },
+      { prompt: "./dirrunner fuzz -u https://admin.example.com/login -p 'username=admin&password=FUZZ&csrf=x' --csrf-field csrf -w wordlist/passwords.txt -c 302",
+        out: [ { menu: ["Fuzz Enumeration", httpRows("10s").concat([
+              ["Target URL", "https://admin.example.com/login"], ["Method", "POST"], ["Wordlist", "wordlist/passwords.txt"],
+              ["Status codes", "302"], ["JSON body", "disabled"], ["POST data", "enabled"],
+              ["CSRF field", "csrf"], ["Encodings", "disabled"] ]) ] },
+          info("loading wordlist wordlist/passwords.txt..."),
+          info("starting enumeration with 40 workers and 213 words"),
+          { prog: ["Progress", 213] },
+          res("fuzz", 302, 512, "Spring2024!") ],
+        caption: "<span class=\"y\">The bypass.</span> <span class=\"lbl\">With</span> <code>--csrf-field csrf</code> <span class=\"lbl\">each attempt silently</span> <b>GETs a fresh token + session cookie</b> <span class=\"lbl\">then replays them in the POST; the placeholder</span> <code>csrf=x</code> <span class=\"lbl\">is overwritten. A valid password now returns</span> <span class=\"c\">302</span> <span class=\"lbl\">(value is a lab placeholder).</span>",
+        mode: "fuzz --csrf-field csrf" },
+      { prompt: "./dirrunner fuzz -u https://admin.example.com/login -p 'username=admin&password=FUZZ&csrf=x' --csrf-field csrf --csrf-url https://admin.example.com/login-form -w wordlist/passwords.txt -c 302",
+        out: [ { menu: ["Fuzz Enumeration", httpRows("10s").concat([
+              ["Target URL", "https://admin.example.com/login"], ["Method", "POST"], ["Wordlist", "wordlist/passwords.txt"],
+              ["Status codes", "302"], ["JSON body", "disabled"], ["POST data", "enabled"],
+              ["CSRF field", "csrf"], ["Encodings", "disabled"] ]) ] },
+          info("loading wordlist wordlist/passwords.txt..."),
+          info("starting enumeration with 40 workers and 213 words"),
+          { prog: ["Progress", 213] },
+          res("fuzz", 302, 512, "Spring2024!") ],
+        caption: "<span class=\"lbl\">Variant: when the token is minted on another page,</span> <code>--csrf-url</code> <span class=\"lbl\">points the token fetch at</span> <span class=\"c\">/login-form</span> <span class=\"lbl\">while the POST still hits</span> <code>/login</code><span class=\"lbl\">. Same result.</span>",
+        mode: "fuzz --csrf-url" }
+    ]
+  };
+
+  var WEB = {
+    key: "web",
+    intro: "<span class=\"lbl\">// Hit</span> <b>▶ Play</b> <span class=\"lbl\">to run the web-assessment modules:</span> traversal → bypass → sqli.",
+    steps: [
+      { prompt: "./dirrunner traversal -u 'https://example.com/?file=FUZZ'",
+        out: [ { menu: ["Path Traversal", httpRows("10s").concat([["Target URL", "https://example.com/?file=FUZZ"]]) ] },
+          info("512 traversal payloads generated"),
+          info("240 content signatures loaded"),
+          { prog: ["Progress", 512] },
+          warn("local file disclosure in query 'file' with payload [../../../../etc/passwd]"),
+          res("traversal", 200, 1683, "https://example.com/?file=../../../../etc/passwd") ],
+        caption: "<b>traversal</b> <span class=\"lbl\">— payloads are generated and encoded automatically, then matched against content signatures. A leaked</span> <span class=\"r\">/etc/passwd</span> <span class=\"lbl\">confirms local file disclosure on the</span> <code>file</code> <span class=\"lbl\">param.</span>",
+        mode: "traversal" },
+      { prompt: "./dirrunner bypass -u https://admin.example.com/admin",
+        out: [ { menu: ["403 Bypass", httpRows("10s").concat([
+              ["Targets", "1"], ["Header wordlist", "wordlist/bypass-headers.txt"], ["Path wordlist", "wordlist/bypass-paths.txt"],
+              ["Extra headers", "0"], ["Extra path source", "disabled"], ["Continue on success", "false"] ]) ] },
+          info("checking access control for https://admin.example.com/admin"),
+          info("baseline status for https://admin.example.com/admin: 403"),
+          warn("https://admin.example.com/admin returned 403; testing bypass candidates"),
+          { prog: ["Progress", 140] },
+          warn("header X-Forwarded-For: 127.0.0.1 reached 200 (baseline 403) at https://admin.example.com/admin"),
+          res("bypass", 200, 6610, "https://admin.example.com/admin  [X-Forwarded-For: 127.0.0.1]") ],
+        caption: "<b>bypass</b> <span class=\"lbl\">— re-tests the</span> <span class=\"y\">403 /admin</span> <span class=\"lbl\">from the first tab with header tricks and path mutations. A spoofed</span> <code>X-Forwarded-For: 127.0.0.1</code> <span class=\"lbl\">flips it to 200.</span>",
+        mode: "bypass" },
+      { prompt: "./dirrunner sqli -u 'https://example.com/item?id=1'",
+        out: [ { menu: ["SQLi Scan", httpRows("10s").concat([["Target URL", "https://example.com/item?id=1"], ["Payload wordlist", "wordlist/sqli-payloads.txt"]]) ] },
+          info("checking SQLi indicators for https://example.com/item?id=1"),
+          { prog: ["Progress", 96] },
+          warn("error-based in query 'id' with payload [1']"),
+          ok("DBMS MySQL (boolean-based) via query:id"),
+          res("sqli", 500, 742, "https://example.com/item?id=1'") ],
+        caption: "<b>sqli</b> <span class=\"lbl\">— error- and boolean-based indicators on</span> <code>id</code> <span class=\"lbl\">(the</span> <span class=\"c\">[✓] DBMS</span> <span class=\"lbl\">line is a real fingerprint). Treat these as leads to confirm manually, within scope.</span>",
+        mode: "sqli" }
+    ]
+  };
+
+  var scenarios = { enum: ENUM, crawl: CRAWL, brute: BRUTE, web: WEB };
+
+  // ---------- element refs ----------
+  var term = document.getElementById("term");
+  var caption = document.getElementById("caption");
+  var modeLabel = document.getElementById("mode-label");
+  var stepsBar = document.getElementById("steps");
+  var playBtn = document.getElementById("play");
+  var prevBtn = document.getElementById("prev");
+  var nextBtn = document.getElementById("next");
+  var restartBtn = document.getElementById("restart");
+  var speedBtn = document.getElementById("speed");
+  var tabEnum = document.getElementById("tab-enum");
+  var tabCrawl = document.getElementById("tab-crawl");
+  var tabBrute = document.getElementById("tab-brute");
+  var tabWeb = document.getElementById("tab-web");
+  var stageEl = document.getElementById("stage");
+  var controlsEl = document.querySelector(".controls");
+
+  // ---------- state ----------
+  var scen = null, steps = [], curKey = "enum", cur = -1, gen = 0, playing = false, dots = [];
+
+  // ---------- render ----------
+  function promptHTML(cmd, caret) {
+    return ln(span("host", "operator@lab") + span("gy", ":") + span("nb", "~/DirRunner") + span("gy", "$ ") +
+      span("cmd", cmd) + (caret ? '<span class="caret">&nbsp;</span>' : ""));
+  }
+  function chunkHTML(ch) {
+    if (ch.html != null) return ch.html;
+    if (ch.menu) return menuHTML(ch.menu[0], ch.menu[1]);
+    if (ch.prog) return progHTML(ch.prog[0], ch.prog[1], ch.prog[1]); // static = 100%
+    return "";
+  }
+  function stepStaticHTML(step) {
+    var h = step.prompt != null ? promptHTML(step.prompt, false) : "";
+    for (var i = 0; i < step.out.length; i++) h += chunkHTML(step.out[i]);
+    return h;
+  }
+  function tailCaret() { return ln(span("host", "operator@lab") + span("gy", ":") + span("nb", "~/DirRunner") + span("gy", "$ ") + '<span class="caret">&nbsp;</span>'); }
+
+  function renderUpTo(idx) {
+    var h = "";
+    for (var i = 0; i <= idx; i++) h += stepStaticHTML(steps[i]);
+    term.innerHTML = h + tailCaret();
+    term.scrollTop = term.scrollHeight;
+  }
+  function setCaption(step) { caption.innerHTML = step.caption; modeLabel.textContent = step.mode; }
+  function updateDots() {
+    dots.forEach(function (dd, i) { dd.classList.toggle("on", i === cur); dd.classList.toggle("done", i < cur); });
+    prevBtn.disabled = cur <= 0; nextBtn.disabled = cur >= steps.length - 1;
+  }
+
+  async function animateProgress(base, p, myGen) {
+    var label = p[0], total = p[1];
+    var frames = reduce ? 1 : 7;
+    for (var f = 1; f <= frames; f++) {
+      if (myGen !== gen) return "";
+      var cur2 = Math.round(total * f / frames);
+      term.innerHTML = base + progHTML(label, cur2, total) + '<span class="ln"><span class="caret">&nbsp;</span></span>';
+      term.scrollTop = term.scrollHeight;
+      await sleep(d(T_PROG));
+    }
+    return progHTML(label, total, total);
+  }
+
+  async function typeStep(idx, myGen) {
+    var step = steps[idx], base = "";
+    for (var i = 0; i < idx; i++) base += stepStaticHTML(steps[i]);
+    setCaption(step);
+
+    if (step.prompt != null) {
+      var full = step.prompt, typed = "";
+      for (var c = 0; c < full.length; c++) {
+        if (myGen !== gen) return;
+        typed += full[c];
+        term.innerHTML = base + promptHTML(typed, true);
+        term.scrollTop = term.scrollHeight;
+        await sleep(d(T_TYPE));
+      }
+      base += promptHTML(full, false);
+      term.innerHTML = base + '<span class="ln"><span class="caret">&nbsp;</span></span>';
+      term.scrollTop = term.scrollHeight;
+      await sleep(d(T_AFTERCMD));
+    }
+
+    var acc = base;
+    for (var li = 0; li < step.out.length; li++) {
+      if (myGen !== gen) return;
+      var ch = step.out[li];
+      if (ch.prog) {
+        var finalBar = await animateProgress(acc, ch.prog, myGen);
+        if (myGen !== gen) return;
+        acc += finalBar;
+      } else {
+        acc += chunkHTML(ch);
+      }
+      term.innerHTML = acc + '<span class="ln"><span class="caret">&nbsp;</span></span>';
+      term.scrollTop = term.scrollHeight;
+      await sleep(d(T_LINE));
+    }
+    if (myGen !== gen) return;
+    term.innerHTML = acc + tailCaret();
+    term.scrollTop = term.scrollHeight;
+    cur = idx; updateDots();
+  }
+
+  function jumpTo(idx) { gen++; cur = idx; renderUpTo(idx); setCaption(steps[idx]); updateDots(); }
+
+  async function play() {
+    if (playing) return;
+    if (cur >= steps.length - 1) { gen++; cur = -1; term.innerHTML = ""; }
+    playing = true; playBtn.textContent = "⏸ Pause"; playBtn.classList.remove("primary");
+    gen++; var myGen = gen;
+    for (var i = cur + 1; i < steps.length; i++) {
+      if (myGen !== gen) return;
+      await typeStep(i, myGen);
+      if (myGen !== gen) return;
+      await sleep(d(T_STEP));
+    }
+    stopPlay();
+  }
+  function stopPlay() {
+    playing = false; gen++;
+    playBtn.textContent = cur >= steps.length - 1 ? "⟲ Replay" : "▶ Play";
+    playBtn.classList.add("primary");
+  }
+
+  function buildDots() {
+    stepsBar.innerHTML = ""; dots = [];
+    steps.forEach(function (s, i) {
+      var b = document.createElement("button");
+      b.className = "sd"; b.setAttribute("aria-label", "step " + (i + 1));
+      b.addEventListener("click", function () { stopPlay(); jumpTo(i); });
+      stepsBar.appendChild(b); dots.push(b);
+    });
+  }
+
+  var tabMap = { enum: tabEnum, crawl: tabCrawl, brute: tabBrute, web: tabWeb };
+  function loadScenario(key) {
+    stopPlay(); gen++;
+    curKey = key; scen = scenarios[key]; steps = scen.steps;
+    cur = -1; term.innerHTML = tailCaret();
+    caption.innerHTML = scen.intro;
+    modeLabel.textContent = "idle…";
+    buildDots(); updateDots();
+    Object.keys(tabMap).forEach(function (k) { tabMap[k].classList.toggle("on", k === key); });
+    if (tabDl) tabDl.classList.remove("on");
+    if (dlSection) { dlSection.hidden = true; stageEl.style.display = ""; controlsEl.style.display = ""; }
+  }
+
+  // ---------- downloads / github releases ----------
+  var dlSection = document.getElementById("downloads");
+  var dlList = document.getElementById("dl-list");
+  var dlCount = document.getElementById("dl-count");
+  var tabDl = document.getElementById("tab-dl");
+  var dlLoaded = false;
+
+  function fmtSize(b) {
+    if (b == null) return "";
+    var u = ["B", "KB", "MB", "GB"], i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return (i === 0 ? b : b.toFixed(1)) + " " + u[i];
+  }
+  function fmtDate(s) { return s ? String(s).slice(0, 10) : ""; }
+  function dlStatus(msg, isErr) { dlList.innerHTML = '<p class="dl-status' + (isErr ? " err" : "") + '">' + msg + "</p>"; }
+  function renderReleases(rels) {
+    if (!rels.length) { dlStatus("// no releases published yet. Build from source — see the post."); dlCount.textContent = ""; return; }
+    dlCount.textContent = rels.length + " release" + (rels.length === 1 ? "" : "s");
+    var h = "";
+    rels.forEach(function (r) {
+      var title = esc(r.name || r.tag_name || "release");
+      h += '<article class="rel"><div class="rel-top"><h3>' + title + "</h3>";
+      h += '<span class="rel-tag' + (r.prerelease ? " pre" : "") + '">' + esc(r.tag_name || "") + (r.prerelease ? " · pre" : "") + "</span>";
+      h += '<span class="rel-date">' + fmtDate(r.published_at) + "</span></div>";
+      var assets = r.assets || [];
+      if (assets.length) {
+        h += '<ul class="assets">';
+        assets.forEach(function (a) {
+          h += '<li class="asset"><a href="' + esc(a.browser_download_url) + '" rel="noopener">▓ ' + esc(a.name) + "</a>"
+            + '<span class="sz">' + fmtSize(a.size) + "</span>"
+            + '<span class="dc">' + (a.download_count || 0) + " ⤓</span></li>";
+        });
+        h += "</ul>";
+      }
+      if (r.html_url) h += '<div class="rel-src"><a href="' + esc(r.html_url) + '" rel="noopener">↗ view on github</a></div>';
+      h += "</article>";
+    });
+    dlList.innerHTML = h;
+  }
+  function loadReleases() {
+    document.getElementById("dl-repo").textContent = RELEASES_REPO;
+    dlStatus("connecting to api.github.com…");
+    fetch("https://api.github.com/repos/" + RELEASES_REPO + "/releases?per_page=20", { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (res) {
+        if (res.status === 404) throw new Error("repo not found or private (" + RELEASES_REPO + ").");
+        if (res.status === 403) throw new Error("GitHub API rate limit reached; try again later.");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) { renderReleases(Array.isArray(data) ? data : []); })
+      .catch(function (e) { dlStatus("// " + esc(e.message), true); dlCount.textContent = ""; });
+  }
+  function showDownloads() {
+    stopPlay();
+    stageEl.style.display = "none"; controlsEl.style.display = "none";
+    dlSection.hidden = false;
+    [tabEnum, tabCrawl, tabBrute, tabWeb].forEach(function (t) { t.classList.remove("on"); });
+    tabDl.classList.add("on");
+    if (!dlLoaded) { dlLoaded = true; loadReleases(); }
+  }
+  if (tabDl) tabDl.addEventListener("click", showDownloads);
+
+  playBtn.addEventListener("click", function () { if (playing) stopPlay(); else play(); });
+  nextBtn.addEventListener("click", function () { stopPlay(); if (cur < steps.length - 1) jumpTo(cur + 1); });
+  prevBtn.addEventListener("click", function () { stopPlay(); if (cur > 0) jumpTo(cur - 1); });
+  restartBtn.addEventListener("click", function () { loadScenario(curKey); });
+  speedBtn.addEventListener("click", function () { spi = (spi + 1) % SPEEDS.length; speedBtn.textContent = "⏱ Speed: " + SPEEDS[spi].n; });
+  tabEnum.addEventListener("click", function () { loadScenario("enum"); });
+  tabCrawl.addEventListener("click", function () { loadScenario("crawl"); });
+  tabBrute.addEventListener("click", function () { loadScenario("brute"); });
+  tabWeb.addEventListener("click", function () { loadScenario("web"); });
+
+  speedBtn.textContent = "⏱ Speed: " + SPEEDS[spi].n;
+  loadScenario("enum");
+
+  // Auto-start the animation once, when the terminal first scrolls into view
+  // (inside the post iframe or on the full-screen page). Manual controls stay.
+  try {
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { io.disconnect(); if (cur < 0 && !playing) play(); }
+        });
+      }, { threshold: 0.3 });
+      io.observe(stageEl);
+    } else {
+      play();
+    }
+  } catch (e) { /* controls still work */ }
+})();
+</script>
