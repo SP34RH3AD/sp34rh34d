@@ -1,6 +1,6 @@
 // Site configuration. Edit these values.
 window.SITE_CONFIG = {
-  githubUser: "sp34rh3ad",        // your GitHub username
+  githubUser: "SP34RH3AD",        // your GitHub username
   hideRepos: [],                  // repos to hide, e.g. ["sp34rh34d.github.io"]
   postsIndex: "posts/index.json", // posts index
   terminal: [                     // lines "typed" into the home terminal
