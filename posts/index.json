@@ -1,0 +1,18 @@
+[
+  {
+    "slug": "valky-pivot-demo",
+    "title": "valky: multi-agent L3 pivoting",
+    "date": "2026-10-28",
+    "repo": "valky",
+    "tags": ["pivoting", "networking", "demo"],
+    "summary": "Visual walkthrough of valky's L3 pivoting: console, mesh topology and the releases list. Links to the interactive demo."
+  },
+  {
+    "slug": "hello-world",
+    "title": "Booting up: how this site is built",
+    "date": "2026-10-28",
+    "repo": "SP34RH3AD.github.io",
+    "tags": ["meta", "github-pages"],
+    "summary": "First post. How this static site works and how to publish posts that reference my repos."
+  }
+]
